@@ -1,0 +1,54 @@
+name: Daily Worksheet Pipeline
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Run pipeline
+        run: node scripts/pipeline.js
+        env:
+          GEMINI_API_KEY:             ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY:             ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_DRIVE_FOLDER_ID:      ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_OAUTH_CLIENT_ID:      ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          GOOGLE_OAUTH_CLIENT_SECRET:  ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+          GOOGLE_OAUTH_REFRESH_TOKEN:  ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
+          TELEGRAM_BOT_TOKEN:         ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID:        ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          SUPABASE_URL:               ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY:  ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GRADE_LEVEL:                Grade 3
+          MAX_PAGES_PER_SET:          "8"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipeline-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 30
+
+      - name: Open failure issue
+        if: failure()
+        run: node scripts/create-issue.js
+        env:
+          GITHUB_TOKEN:        ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY:   ${{ github.repository }}
+          GITHUB_RUN_ID:       ${{ github.run_id }}
+          MAINTAINER_USERNAME: peerapatfc

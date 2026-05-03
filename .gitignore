@@ -1,0 +1,8 @@
+.env
+node_modules/
+logs/*.json
+scripts/test-drive-upload.js
+scripts/get-refresh-token.js
+*.json
+!package.json
+!package-lock.json
