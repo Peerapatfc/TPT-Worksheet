@@ -8,7 +8,13 @@ export async function convertPdfs(pages) {
     const pdfDoc = await PDFDocument.create()
     const pdfPage = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT])
     const pngImage = await pdfDoc.embedPng(page.buffer)
-    pdfPage.drawImage(pngImage, { x: 0, y: 0, width: A4_WIDTH, height: A4_HEIGHT })
+    const { width: imgW, height: imgH } = pngImage
+    const scale = Math.min(A4_WIDTH / imgW, A4_HEIGHT / imgH)
+    const drawW = imgW * scale
+    const drawH = imgH * scale
+    const x = (A4_WIDTH - drawW) / 2
+    const y = (A4_HEIGHT - drawH) / 2
+    pdfPage.drawImage(pngImage, { x, y, width: drawW, height: drawH })
     const pdfBuffer = Buffer.from(await pdfDoc.save())
     return { ...page, pdfBuffer }
   }))
