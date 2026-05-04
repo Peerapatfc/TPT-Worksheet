@@ -119,10 +119,14 @@ export async function uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedP
   ])
   console.log(`Uploaded combined PDFs (grayscale + color)`)
 
-  const tptFolderId = process.env.GOOGLE_DRIVE_TPT_FOLDER_ID
-  if (tptFolderId) {
-    await uploadBuffer(drive, combinedPdfBuffer, combinedFilename, 'application/pdf', tptFolderId)
-    console.log(`Uploaded ${combinedFilename} to TPT folder`)
+  const tptRootId = process.env.GOOGLE_DRIVE_TPT_FOLDER_ID
+  if (tptRootId) {
+    const tptSubfolder = await createFolder(drive, folderName, tptRootId)
+    await Promise.all([
+      uploadBuffer(drive, combinedPdfBuffer, combinedFilename, 'application/pdf', tptSubfolder.id),
+      uploadBuffer(drive, colorCombinedPdfBuffer, colorCombinedFilename, 'application/pdf', tptSubfolder.id),
+    ])
+    console.log(`Uploaded combined PDFs to TPT subfolder: ${folderName}`)
   }
 
   return { link: folder.webViewLink, folderId }
