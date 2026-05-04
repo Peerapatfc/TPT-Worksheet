@@ -18,10 +18,14 @@ export async function brainstorm(gradeLevel, maxPages, history = []) {
           .join('\n')}\n`
       : ''
 
+  const gradeInstruction = gradeLevel
+    ? `for ${gradeLevel} students${gradeLevel.includes('-') ? ' — pick the single most appropriate specific grade within this range' : ''}`
+    : 'for any grade level from Kindergarten to Grade 6 — pick the grade that best fits the topic and has the highest sellability'
+
   const prompt = `You are a curriculum designer for Teachers Pay Teachers (TPT).
 ${historyBlock}
-Step 1: Generate 3 candidate printable worksheet SET topics for ${gradeLevel} students.
-For each include: title, subject, learningObjective, sellabilityScore (1-10), reason.
+Step 1: Generate 3 candidate printable worksheet SET topics ${gradeInstruction}.
+For each include: title, subject, gradeLevel (specific, e.g. "Grade 2"), learningObjective, sellabilityScore (1-10), reason.
 Pick topics that are DIFFERENT from the previously generated list above.
 
 Step 2: Pick the single best topic (highest sellability + grade-appropriateness + originality).

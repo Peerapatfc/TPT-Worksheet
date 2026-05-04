@@ -17,7 +17,7 @@ async function main() {
   appendLog({ step: 'load_history', status: 'ok', count: history.length })
 
   const plan = await brainstorm(
-    process.env.GRADE_LEVEL ?? 'Grade 3',
+    process.env.GRADE_LEVEL || null,
     parseInt(process.env.MAX_PAGES_PER_SET ?? '8', 10),
     history,
   )
