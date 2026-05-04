@@ -44,7 +44,7 @@ async function uploadBuffer(drive, buffer, filename, mimeType, folderId) {
   return res.data
 }
 
-export async function uploadDrive(plan, pages, runDate) {
+export async function uploadDrive(plan, pages, combinedPdfBuffer, runDate) {
   const drive = getDrive()
   const parentId = process.env.GOOGLE_DRIVE_FOLDER_ID
   const setSlug = `${slugify(plan.setTitle)}-${randomUUID().slice(0, 8)}`
@@ -101,6 +101,10 @@ export async function uploadDrive(plan, pages, runDate) {
   ].join('\n')
 
   await uploadBuffer(drive, Buffer.from(tptText), 'tpt-listing.txt', 'text/plain', folderId)
+
+  const combinedFilename = `${slugify(plan.setTitle)}-complete-set.pdf`
+  await uploadBuffer(drive, combinedPdfBuffer, combinedFilename, 'application/pdf', folderId)
+  console.log(`Uploaded ${combinedFilename} (combined all pages)`)
 
   return { link: folder.webViewLink, folderId }
 }

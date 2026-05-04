@@ -5,7 +5,7 @@ import { validatePage } from './validate-page.js'
 const client = new OpenAI()
 const MAX_RETRIES = 2
 
-const BASE_STYLE = 'Portrait orientation, A4 blackline printable. Clean sans-serif font, thick border frame. No color fills. Professional TPT layout.'
+const BASE_STYLE = 'Portrait orientation, A4 printable worksheet. Clean sans-serif font, thick border frame. Colorful and engaging design. Professional TPT layout.'
 
 const TYPE_STYLE = {
   cover: 'COVER PAGE: Large decorative title centered on page. Student name line and date line below title. Decorative thematic border or illustration. NO questions, NO exercises, NO answer spaces. Title page only.',
@@ -26,12 +26,11 @@ export async function generatePages(plan) {
       const response = await client.images.generate({
         model: 'gpt-image-2',
         prompt,
-        size: '1024x1024',
+        size: '1024x1536',
         quality: 'medium',
       })
 
-      const raw = Buffer.from(response.data[0].b64_json, 'base64')
-      buffer = await sharp(raw).grayscale().png().toBuffer()
+      buffer = Buffer.from(response.data[0].b64_json, 'base64')
 
       const validation = await validatePage(page, buffer)
       if (validation.pass) {
