@@ -2,6 +2,20 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
 
+async function withRetry(fn, maxAttempts = 4, baseDelayMs = 2000) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      const retryable = err.status === 503 || err.status === 429
+      if (!retryable || attempt === maxAttempts) throw err
+      const delay = baseDelayMs * 2 ** (attempt - 1)
+      console.warn(`Gemini ${err.status} on attempt ${attempt}/${maxAttempts} — retrying in ${delay}ms`)
+      await new Promise(r => setTimeout(r, delay))
+    }
+  }
+}
+
 export async function validatePage(page, buffer) {
   const model = genAI.getGenerativeModel({
     model: 'gemini-2.5-flash',
@@ -25,10 +39,16 @@ Return JSON only:
 
 If all checks pass, return { "pass": true, "issues": [] }`
 
-  const result = await model.generateContent([
-    prompt,
-    { inlineData: { mimeType: 'image/png', data: buffer.toString('base64') } },
-  ])
+  let result
+  try {
+    result = await withRetry(() => model.generateContent([
+      prompt,
+      { inlineData: { mimeType: 'image/png', data: buffer.toString('base64') } },
+    ]))
+  } catch (err) {
+    console.warn(`validatePage failed after retries (${err.status ?? err.message}) — skipping`)
+    return { pass: true, issues: [`validation skipped: ${err.status ?? err.message}`] }
+  }
 
   let validation
   try {

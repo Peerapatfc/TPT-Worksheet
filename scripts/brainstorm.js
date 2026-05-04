@@ -2,6 +2,20 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
 
+async function withRetry(fn, maxAttempts = 4, baseDelayMs = 2000) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      const retryable = err.status === 503 || err.status === 429
+      if (!retryable || attempt === maxAttempts) throw err
+      const delay = baseDelayMs * 2 ** (attempt - 1)
+      console.warn(`Gemini ${err.status} on attempt ${attempt}/${maxAttempts} — retrying in ${delay}ms`)
+      await new Promise(r => setTimeout(r, delay))
+    }
+  }
+}
+
 const TPT_SUBJECT_AREAS = [
   // Art
   'Art', 'Art History', 'Coloring Pages', 'Graphic Arts', 'Visual Arts', 'Other (Arts)',
@@ -200,7 +214,7 @@ Return JSON matching this exact schema:
   }
 }`
 
-  const result = await model.generateContent(prompt)
+  const result = await withRetry(() => model.generateContent(prompt))
   const raw = result.response.text()
 
   let plan
