@@ -9,19 +9,31 @@ import { appendLog } from './logger.js'
 
 const runDate = new Date().toISOString().split('T')[0]
 
+function getPackageType() {
+  const day = new Date().getDay()
+  const freeDay = parseInt(process.env.FREE_WORKSHEET_DAY ?? '0', 10)
+  const largeDayRaw = process.env.LARGE_PACKAGE_DAY
+  const largeDay = largeDayRaw != null ? parseInt(largeDayRaw, 10) : -1
+  if (day === freeDay) return 'free'
+  if (largeDay >= 0 && day === largeDay) return 'large'
+  return 'small'
+}
+
 async function main() {
   const start = Date.now()
-  appendLog({ step: 'start', status: 'ok', timestamp: new Date().toISOString() })
+  const packageType = getPackageType()
+  appendLog({ step: 'start', status: 'ok', timestamp: new Date().toISOString(), packageType })
 
   const history = await readTopicHistory()
   appendLog({ step: 'load_history', status: 'ok', count: history.length })
 
   const plan = await brainstorm(
     process.env.GRADE_LEVEL || null,
-    parseInt(process.env.MAX_PAGES_PER_SET ?? '8', 10),
+    parseInt(process.env.MAX_PAGES_PER_SET ?? '30', 10),
     history,
+    packageType,
   )
-  appendLog({ step: 'brainstorm', status: 'ok', topic: plan.setTitle, pageCount: plan.pageCount })
+  appendLog({ step: 'brainstorm', status: 'ok', topic: plan.setTitle, pageCount: plan.pageCount, packageType })
 
   const pages = await generatePages(plan)
   appendLog({ step: 'generate_images', status: 'ok', generated: pages.length })

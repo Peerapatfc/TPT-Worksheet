@@ -93,11 +93,18 @@ export async function uploadDrive(plan, pages, combinedPdfBuffer, runDate) {
     '',
     `KEYWORDS: ${plan.tptListing.keywords.join(', ')}`,
     '',
+    `SUBJECT AREAS: ${plan.tptListing.subjectAreas.join(', ')}`,
+    '',
+    `TAGS: ${plan.tptListing.tags.join(', ')}`,
+    '',
     `SUGGESTED PRICE: $${plan.tptListing.suggestedPrice.toFixed(2)}`,
     '',
     `GRADE LEVEL: ${plan.gradeLevel}`,
     `SUBJECT: ${plan.subject}`,
+    `FORMAT: Printable`,
     `PAGES: ${plan.pageCount} (includes answer key)`,
+    `ANSWER KEY: Yes`,
+    `TEACHING DURATION: ${plan.tptListing.teachingDuration}`,
   ].join('\n')
 
   await uploadBuffer(drive, Buffer.from(tptText), 'tpt-listing.txt', 'text/plain', folderId)
@@ -105,6 +112,12 @@ export async function uploadDrive(plan, pages, combinedPdfBuffer, runDate) {
   const combinedFilename = `${slugify(plan.setTitle)}-complete-set.pdf`
   await uploadBuffer(drive, combinedPdfBuffer, combinedFilename, 'application/pdf', folderId)
   console.log(`Uploaded ${combinedFilename} (combined all pages)`)
+
+  const tptFolderId = process.env.GOOGLE_DRIVE_TPT_FOLDER_ID
+  if (tptFolderId) {
+    await uploadBuffer(drive, combinedPdfBuffer, combinedFilename, 'application/pdf', tptFolderId)
+    console.log(`Uploaded ${combinedFilename} to TPT folder`)
+  }
 
   return { link: folder.webViewLink, folderId }
 }
