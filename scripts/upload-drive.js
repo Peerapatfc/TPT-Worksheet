@@ -44,7 +44,7 @@ async function uploadBuffer(drive, buffer, filename, mimeType, folderId) {
   return res.data
 }
 
-export async function uploadDrive(plan, pages, combinedPdfBuffer, runDate) {
+export async function uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedPdfBuffer, runDate) {
   const drive = getDrive()
   const parentId = process.env.GOOGLE_DRIVE_FOLDER_ID
   const setSlug = `${slugify(plan.setTitle)}-${randomUUID().slice(0, 8)}`
@@ -109,9 +109,15 @@ export async function uploadDrive(plan, pages, combinedPdfBuffer, runDate) {
 
   await uploadBuffer(drive, Buffer.from(tptText), 'tpt-listing.txt', 'text/plain', folderId)
 
-  const combinedFilename = `${slugify(plan.setTitle)}-complete-set.pdf`
-  await uploadBuffer(drive, combinedPdfBuffer, combinedFilename, 'application/pdf', folderId)
-  console.log(`Uploaded ${combinedFilename} (combined all pages)`)
+  const slug = slugify(plan.setTitle)
+  const combinedFilename = `${slug}-complete-set.pdf`
+  const colorCombinedFilename = `${slug}-complete-set-color.pdf`
+
+  await Promise.all([
+    uploadBuffer(drive, combinedPdfBuffer, combinedFilename, 'application/pdf', folderId),
+    uploadBuffer(drive, colorCombinedPdfBuffer, colorCombinedFilename, 'application/pdf', folderId),
+  ])
+  console.log(`Uploaded combined PDFs (grayscale + color)`)
 
   const tptFolderId = process.env.GOOGLE_DRIVE_TPT_FOLDER_ID
   if (tptFolderId) {
