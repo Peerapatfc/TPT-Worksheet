@@ -212,6 +212,11 @@ Return JSON matching this exact schema:
 
   validate(plan, maxPages, packageType)
   if (packageType === 'free') plan.tptListing.suggestedPrice = 0
+
+  // Filter out any invalid values Gemini hallucinated
+  plan.tptListing.subjectAreas = plan.tptListing.subjectAreas.filter(a => TPT_SUBJECT_AREAS.includes(a))
+  plan.tptListing.tags = plan.tptListing.tags.filter(t => TPT_TAGS.includes(t))
+
   return plan
 }
 
@@ -228,17 +233,19 @@ function validate(plan, maxPages, packageType) {
     throw new Error('Last page must be answer_key')
   if (!plan.tptListing?.title) throw new Error('Missing tptListing.title')
   const areas = plan.tptListing?.subjectAreas
-  if (!Array.isArray(areas) || areas.length < 1 || areas.length > 3)
-    throw new Error('tptListing.subjectAreas must have 1–3 items')
-  const invalid = areas.filter(a => !TPT_SUBJECT_AREAS.includes(a))
-  if (invalid.length > 0)
-    throw new Error(`Invalid subjectAreas: ${invalid.join(', ')}`)
+  if (!Array.isArray(areas) || areas.length < 1)
+    throw new Error('tptListing.subjectAreas must have at least 1 item')
+  const invalidAreas = areas.filter(a => !TPT_SUBJECT_AREAS.includes(a))
+  if (invalidAreas.length > 0) console.warn(`Filtering invalid subjectAreas: ${invalidAreas.join(', ')}`)
+  const validAreas = areas.filter(a => TPT_SUBJECT_AREAS.includes(a))
+  if (validAreas.length === 0) throw new Error('No valid subjectAreas after filtering')
   const tags = plan.tptListing?.tags
-  if (!Array.isArray(tags) || tags.length < 1 || tags.length > 6)
-    throw new Error('tptListing.tags must have 1–6 items')
+  if (!Array.isArray(tags) || tags.length < 1)
+    throw new Error('tptListing.tags must have at least 1 item')
   const invalidTags = tags.filter(t => !TPT_TAGS.includes(t))
-  if (invalidTags.length > 0)
-    throw new Error(`Invalid tags: ${invalidTags.join(', ')}`)
+  if (invalidTags.length > 0) console.warn(`Filtering invalid tags: ${invalidTags.join(', ')}`)
+  const validTags = tags.filter(t => TPT_TAGS.includes(t))
+  if (validTags.length === 0) throw new Error('No valid tags after filtering')
   if (!plan.tptListing?.teachingDuration)
     throw new Error('Missing tptListing.teachingDuration')
 }
