@@ -3,7 +3,7 @@ import sharp from 'sharp'
 import { validatePage } from './validate-page.js'
 
 const client = new OpenAI()
-const MAX_RETRIES = 2
+const MAX_ATTEMPTS = 5
 
 const BASE_STYLE = 'Portrait orientation, A4 printable worksheet. Clean sans-serif font, thick border frame. Colorful and engaging design. Professional TPT layout.'
 
@@ -20,9 +20,8 @@ export async function generatePages(plan) {
   for (const page of plan.pages) {
     const prompt = buildPrompt(plan, page)
     let buffer
-    let attempt = 0
 
-    while (attempt <= MAX_RETRIES) {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       const response = await client.images.generate({
         model: 'gpt-image-2',
         prompt,
@@ -34,17 +33,15 @@ export async function generatePages(plan) {
 
       const validation = await validatePage(page, buffer, plan)
       if (validation.pass) {
-        console.log(`Generated page ${page.pageNum}/${plan.pageCount}: ${page.filename}`)
+        console.log(`Generated page ${page.pageNum}/${plan.pageCount}: ${page.filename} (attempt ${attempt})`)
         break
       }
 
-      attempt++
-      if (attempt > MAX_RETRIES) {
-        console.warn(`Page ${page.pageNum} failed validation after ${MAX_RETRIES} retries: ${validation.issues.join(', ')}`)
-        break
+      if (attempt === MAX_ATTEMPTS) {
+        console.warn(`Page ${page.pageNum} failed validation after ${MAX_ATTEMPTS} attempts: ${validation.issues.join(', ')}`)
+      } else {
+        console.log(`Page ${page.pageNum} validation failed (attempt ${attempt}/${MAX_ATTEMPTS}): ${validation.issues.join(', ')} — retrying...`)
       }
-
-      console.log(`Page ${page.pageNum} validation failed (attempt ${attempt}): ${validation.issues.join(', ')} — retrying...`)
     }
 
     pages.push({ ...page, buffer })

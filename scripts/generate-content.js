@@ -1,4 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import { mkdirSync, writeFileSync } from 'fs'
+import { join } from 'path'
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
 
@@ -95,10 +97,11 @@ async function validateAndCorrect(model, plan, contentData) {
 
 Set: "${plan.setTitle}" | Grade: ${plan.gradeLevel} | Subject: ${plan.subject}
 
-Review every question and answer below. For each item:
-1. Verify the answer is academically correct (math calculations, spelling, grammar, facts, logic)
-2. Verify the question is appropriate in difficulty for ${plan.gradeLevel} level
-3. If wrong or inappropriate, provide the corrected answer
+Review every question and answer below. For each item check ALL of:
+1. The answer is academically correct (math calculations, spelling, grammar, facts, logic)
+2. The answer actually and specifically answers its question — not just correct in isolation
+3. The question is appropriate in difficulty for ${plan.gradeLevel} level
+4. If wrong, mismatched, or inappropriate, provide the corrected answer
 
 ${JSON.stringify(contentData.pages, null, 2)}
 
@@ -176,6 +179,19 @@ export async function generateContent(plan) {
 
     contentData = await validateAndCorrect(model, plan, contentData)
     break
+  }
+
+  const slug = plan.setTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  const date = new Date().toISOString().split('T')[0]
+  try {
+    mkdirSync(join('logs'), { recursive: true })
+    writeFileSync(
+      join('logs', `content-${date}-${slug}.json`),
+      JSON.stringify(contentData, null, 2),
+    )
+    console.log(`Content saved: logs/content-${date}-${slug}.json`)
+  } catch (err) {
+    console.warn(`generateContent: failed to save JSON (${err.message})`)
   }
 
   const contentMap = new Map(contentData.pages.map(p => [p.pageNum, p]))
