@@ -8,7 +8,7 @@ on:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v4
@@ -26,15 +26,18 @@ jobs:
           GEMINI_API_KEY:             ${{ secrets.GEMINI_API_KEY }}
           OPENAI_API_KEY:             ${{ secrets.OPENAI_API_KEY }}
           GOOGLE_DRIVE_FOLDER_ID:      ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_DRIVE_TPT_FOLDER_ID:  ${{ secrets.GOOGLE_DRIVE_TPT_FOLDER_ID }}
           GOOGLE_OAUTH_CLIENT_ID:      ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
           GOOGLE_OAUTH_CLIENT_SECRET:  ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
           GOOGLE_OAUTH_REFRESH_TOKEN:  ${{ secrets.GOOGLE_OAUTH_REFRESH_TOKEN }}
-          TELEGRAM_BOT_TOKEN:         ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHANNEL_ID:        ${{ secrets.TELEGRAM_CHANNEL_ID }}
-          SUPABASE_URL:               ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY:  ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          GRADE_LEVEL:                ${{ vars.GRADE_LEVEL }}
-          MAX_PAGES_PER_SET:          "8"
+          TELEGRAM_BOT_TOKEN:          ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID:         ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          SUPABASE_URL:                ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY:   ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GRADE_LEVEL:                 ${{ vars.GRADE_LEVEL }}
+          MAX_PAGES_PER_SET:           ${{ vars.MAX_PAGES_PER_SET }}
+          FREE_WORKSHEET_DAY:          ${{ vars.FREE_WORKSHEET_DAY }}
+          LARGE_PACKAGE_DAY:           ${{ vars.LARGE_PACKAGE_DAY }}
 
       - name: Upload logs
         if: always()
