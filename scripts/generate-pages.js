@@ -32,7 +32,7 @@ export async function generatePages(plan) {
 
       buffer = Buffer.from(response.data[0].b64_json, 'base64')
 
-      const validation = await validatePage(page, buffer)
+      const validation = await validatePage(page, buffer, plan)
       if (validation.pass) {
         console.log(`Generated page ${page.pageNum}/${plan.pageCount}: ${page.filename}`)
         break
@@ -56,5 +56,20 @@ export async function generatePages(plan) {
 function buildPrompt(plan, page) {
   const typeStyle = TYPE_STYLE[page.type] ?? TYPE_STYLE.worksheet
   const headerInfo = `"${plan.setTitle}" | ${plan.gradeLevel} | Page ${page.pageNum} of ${plan.pageCount}`
-  return `${BASE_STYLE} ${typeStyle} Header bar: ${headerInfo}. ${page.imagePrompt}`.trim()
+
+  let contentBlock = ''
+  if (page.content?.questions?.length > 0) {
+    const qLines = page.content.questions.map(q => `${q.num}. ${q.question}`).join('\n')
+    contentBlock = ` Use these exact questions:\n${qLines}`
+  } else if (page.type === 'answer_key') {
+    const allQA = plan.pages
+      .filter(p => p.content?.questions?.length > 0)
+      .flatMap(p => p.content.questions)
+      .map(q => `${q.num}. ${q.question} → ${q.answer}`)
+    if (allQA.length > 0) {
+      contentBlock = ` Show these questions with correct answers filled in:\n${allQA.join('\n')}`
+    }
+  }
+
+  return `${BASE_STYLE} ${typeStyle} Header bar: ${headerInfo}. ${page.imagePrompt}${contentBlock}`.trim()
 }

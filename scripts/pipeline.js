@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { brainstorm } from './brainstorm.js'
+import { generateContent } from './generate-content.js'
 import { generatePages } from './generate-pages.js'
 import { convertPdfs } from './convert-pdf.js'
 import { uploadDrive } from './upload-drive.js'
@@ -35,7 +36,10 @@ async function main() {
   )
   appendLog({ step: 'brainstorm', status: 'ok', topic: plan.setTitle, pageCount: plan.pageCount, packageType })
 
-  const pages = await generatePages(plan)
+  const planWithContent = await generateContent(plan)
+  appendLog({ step: 'generate_content', status: 'ok' })
+
+  const pages = await generatePages(planWithContent)
   appendLog({ step: 'generate_images', status: 'ok', generated: pages.length })
 
   const { pagesWithPdf, combinedPdfBuffer, colorCombinedPdfBuffer } = await convertPdfs(pages)
