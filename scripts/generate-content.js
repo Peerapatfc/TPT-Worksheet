@@ -47,7 +47,7 @@ For pages with NO data visualization (pure text questions, writing prompts): set
 
 STEP 2 — Generate Q&A from your imageSpec:
 - Every answer must be derivable from the exact data in imageSpec
-- 4–8 questions per page, appropriate for ${plan.gradeLevel}
+- ${plan.packageType === 'free' ? '4–5' : plan.packageType === 'large' ? '5–8' : '4–6'} questions per page, appropriate for ${plan.gradeLevel}
 - For Math: use exact numbers from imageSpec. For ELA: clear sentence prompts. For Science/Social Studies: fact-based.
 - All answers must be factually and academically correct.
 
@@ -115,7 +115,8 @@ Call the generate_page_content function with content for all pages.`
   return JSON.parse(toolCall.function.arguments)
 }
 
-function validateSchema(contentData, contentPages) {
+function validateSchema(contentData, contentPages, packageType = 'small') {
+  const minQ = packageType === 'large' ? 5 : 4
   const issues = []
   const contentMap = new Map(contentData.pages.map(p => [p.pageNum, p]))
 
@@ -129,8 +130,8 @@ function validateSchema(contentData, contentPages) {
       issues.push(`page ${page.pageNum} has no questions`)
       continue
     }
-    if (content.questions.length < 4) {
-      issues.push(`page ${page.pageNum} has only ${content.questions.length} questions (min 4)`)
+    if (content.questions.length < minQ) {
+      issues.push(`page ${page.pageNum} has only ${content.questions.length} questions (min ${minQ})`)
     }
     for (const q of content.questions) {
       if (!q.question?.trim()) issues.push(`page ${page.pageNum} q${q.num} empty question`)
@@ -236,7 +237,7 @@ export async function generateContent(plan) {
     contentData = await fetchContent(plan, contentPages)
     if (!contentData) return plan
 
-    const schemaIssues = validateSchema(contentData, contentPages)
+    const schemaIssues = validateSchema(contentData, contentPages, plan.packageType)
     if (schemaIssues.length > 0) {
       console.warn(`generateContent schema (attempt ${attempt}/${MAX_RETRIES + 1}): ${schemaIssues.join(', ')}`)
       if (attempt <= MAX_RETRIES) continue

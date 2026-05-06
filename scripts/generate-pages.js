@@ -55,21 +55,21 @@ export async function generatePages(plan) {
 
 function buildPrompt(plan, page) {
   const typeStyle = TYPE_STYLE[page.type] ?? TYPE_STYLE.worksheet
-  const pageLabel = page.type === 'answer_key' && page.sourcePageNum
-    ? `Answer Key (Page ${page.sourcePageNum})`
+  const pageLabel = page.type === 'answer_key' && page.sourcePageNums?.length
+    ? `Answer Key (Pages ${page.sourcePageNums.join(' & ')})`
     : `Page ${page.pageNum} of ${plan.pageCount}`
   const headerInfo = `"${plan.setTitle}" | ${plan.gradeLevel} | ${pageLabel}`
 
   let contentBlock = ''
   if (page.type === 'answer_key') {
-    const sourcePage = page.sourcePageNum
-      ? plan.pages.find(p => p.pageNum === page.sourcePageNum)
-      : null
-    const questions = sourcePage?.content?.questions
-      ?? plan.pages.filter(p => p.content?.questions?.length > 0).flatMap(p => p.content.questions)
+    const nums = page.sourcePageNums ?? (page.sourcePageNum ? [page.sourcePageNum] : [])
+    const sourcePages = nums.map(n => plan.pages.find(p => p.pageNum === n)).filter(Boolean)
+    const questions = sourcePages.length > 0
+      ? sourcePages.flatMap(p => p.content?.questions ?? [])
+      : plan.pages.filter(p => p.content?.questions?.length > 0).flatMap(p => p.content.questions)
     const qaLines = questions.map(q => `${q.num}. ${q.question} → ${q.answer}`)
     if (qaLines.length > 0) {
-      const forLabel = sourcePage ? ` for Page ${sourcePage.pageNum}` : ''
+      const forLabel = nums.length > 0 ? ` for Pages ${nums.join(' & ')}` : ''
       contentBlock = ` Answers${forLabel} — text only, do not redraw any diagrams:\n${qaLines.join('\n')}`
     }
   } else if (page.content) {

@@ -32,15 +32,14 @@ export async function validatePage(page, buffer, plan = {}) {
     }
 
     if (isAnswerKey) {
-      const sourcePage = page.sourcePageNum
-        ? (plan.pages ?? []).find(p => p.pageNum === page.sourcePageNum)
-        : null
-      const qaSource = sourcePage?.content?.questions?.length > 0
-        ? sourcePage.content.questions
+      const nums = page.sourcePageNums ?? (page.sourcePageNum ? [page.sourcePageNum] : [])
+      const sourcePages = nums.map(n => (plan.pages ?? []).find(p => p.pageNum === n)).filter(Boolean)
+      const qaSource = sourcePages.length > 0
+        ? sourcePages.flatMap(p => p.content?.questions ?? [])
         : (plan.pages ?? []).filter(p => p.content?.questions?.length > 0).flatMap(p => p.content.questions)
       if (qaSource.length > 0) {
         const qaList = qaSource.map(q => `${q.num}. Q: ${q.question} → Expected: ${q.answer}`).join('\n')
-        const forLabel = sourcePage ? ` (answers for Page ${sourcePage.pageNum})` : ''
+        const forLabel = nums.length > 0 ? ` (answers for Pages ${nums.join(' & ')})` : ''
         contentChecks += `\n7. The answer key${forLabel} shows correct answers matching these questions. Flag any missing or incorrect answer:\n${qaList}`
       } else {
         contentChecks += `\n7. Every answer shown is academically correct — verify math calculations, spelling, grammar, facts, or logic. Flag any incorrect answer.`

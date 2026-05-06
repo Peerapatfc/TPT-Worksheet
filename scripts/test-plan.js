@@ -23,7 +23,7 @@ async function main() {
   console.log(`Tags:     ${plan.tptListing.tags.join(', ')}`)
   console.log('\nPage plan:')
   for (const p of plan.pages) {
-    const extra = p.sourcePageNum ? ` → answers p${p.sourcePageNum}` : ''
+    const extra = p.sourcePageNums?.length ? ` → answers p${p.sourcePageNums.join('+p')}` : ''
     console.log(`  ${String(p.pageNum).padStart(2)}. [${p.type.padEnd(10)}] ${p.filename}${extra}`)
   }
 
