@@ -1,16 +1,16 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import OpenAI from 'openai'
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+const client = new OpenAI()
 
 async function withRetry(fn, maxAttempts = 4, baseDelayMs = 2000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await fn()
     } catch (err) {
-      const retryable = err.status === 503 || err.status === 429
+      const retryable = err.status === 429 || err.status === 503 || err.status === 500
       if (!retryable || attempt === maxAttempts) throw err
       const delay = baseDelayMs * 2 ** (attempt - 1)
-      console.warn(`Gemini ${err.status} on attempt ${attempt}/${maxAttempts} — retrying in ${delay}ms`)
+      console.warn(`OpenAI ${err.status} on attempt ${attempt}/${maxAttempts} — retrying in ${delay}ms`)
       await new Promise(r => setTimeout(r, delay))
     }
   }
@@ -120,18 +120,10 @@ const TPT_TAGS = [
 const PAGE_RANGES = {
   free:  { min: 3,  max: 8  },
   small: { min: 10, max: 20 },
-  large: { min: 20, max: null }, // max = maxPages from env
+  large: { min: 20, max: null },
 }
 
 export async function brainstorm(gradeLevel, maxPages, history = [], packageType = 'small') {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    generationConfig: {
-      responseMimeType: 'application/json',
-      temperature: 0.9,
-    },
-  })
-
   const historyBlock =
     history.length > 0
       ? `\nPREVIOUSLY GENERATED TOPICS — do NOT repeat or create anything similar in subject, title, or keywords:\n${history
@@ -150,11 +142,21 @@ export async function brainstorm(gradeLevel, maxPages, history = [], packageType
   const pageMax = packageType === 'large' ? maxPages : range.max
 
   const step2 = {
-    free: `Step 2: Pick the single best topic. Create a FREE standalone worksheet set — ${range.min}–${range.max} pages including a cover (type "cover"), 1–6 worksheet/activity pages, and an answer key (type "answer_key") as the last page. Keep it self-contained. This is a lead-magnet to attract buyers to paid products.`,
-    small: `Step 2: Pick the single best topic (highest sellability + grade-appropriateness + originality).
-Plan a small worksheet packet — ${range.min}–${range.max} pages including a cover (type "cover"), multiple worksheets/activities, and an answer key (type "answer_key") as the last page.`,
-    large: `Step 2: Pick the single best topic (highest sellability + grade-appropriateness + originality).
-Plan a comprehensive worksheet unit — ${range.min}–${pageMax} pages including a cover (type "cover"), diverse worksheets and activities (different types: practice, application, challenge), and an answer key (type "answer_key") as the last page. Aim for depth and variety.`,
+    free: `Step 2: Pick the single best topic. Create a standalone worksheet set with exactly this structure:
+- 1 cover page (type "cover")
+- N worksheet/activity pages (choose N so total = 1 + 2N falls within ${range.min}–${range.max})
+- N answer_key pages at the end — ONE per worksheet/activity, in matching order
+Each answer_key page must have sourcePageNum set to the pageNum of the worksheet/activity it answers.`,
+    small: `Step 2: Pick the single best topic (highest sellability + grade-appropriateness + originality). Structure:
+- 1 cover page (type "cover")
+- N worksheet/activity pages (choose N so total = 1 + 2N falls within ${range.min}–${range.max})
+- N answer_key pages at the end — ONE per worksheet/activity, in matching order
+Each answer_key page must have sourcePageNum set to the pageNum of the worksheet/activity it answers.`,
+    large: `Step 2: Pick the single best topic (highest sellability + grade-appropriateness + originality). Structure:
+- 1 cover page (type "cover")
+- N diverse worksheet/activity pages (practice, application, challenge types; choose N so total = 1 + 2N falls within ${range.min}–${pageMax})
+- N answer_key pages at the end — ONE per worksheet/activity, in matching order
+Each answer_key page must have sourcePageNum set to the pageNum of the worksheet/activity it answers.`,
   }[packageType]
 
   const priceInstruction = {
@@ -164,7 +166,7 @@ Plan a comprehensive worksheet unit — ${range.min}–${pageMax} pages includin
   }[packageType]
 
   const descriptionInstruction = {
-    free:  `2-3 sentences mentioning this is a FREE sample worksheet set.`,
+    free:  `2-3 sentences describing this worksheet set for TPT.`,
     small: `2-3 sentences describing this small worksheet packet for TPT.`,
     large: `2-3 sentences describing this comprehensive worksheet unit for TPT, emphasising depth and variety.`,
   }[packageType]
@@ -185,51 +187,132 @@ ${tagList}
 
 Step 5: Estimate teachingDuration in minutes (e.g. "30 minutes", "45-60 minutes") based on page count and activity complexity.
 
+Step 6: For every worksheet and activity page, populate the "content" field:
+- "questions": array of EVERY question/exercise on that page with its correct answer. Number them sequentially across ALL worksheet/activity pages (q1, q2, q3... continuing from page to page — do NOT restart at 1 per page).
+- "imageSpec": if the page contains a picture graph, bar chart, tally chart, data table, or number line with specific values — describe the EXACT values (e.g. "picture graph: cats=5, dogs=8, fish=3"). Otherwise set null.
+- cover and answer_key pages: set content to null.
+The answer key image will be generated using ONLY these questions and answers — so they must be complete and correct.
+
 Rules for tptListing fields:
 - description: ${descriptionInstruction}
 - suggestedPrice: ${priceInstruction}
 
-Return JSON matching this exact schema:
-{
-  "setTitle": "string",
-  "subject": "string",
-  "gradeLevel": "string",
-  "pageCount": number,
-  "pages": [
-    {
-      "pageNum": number,
-      "type": "cover|worksheet|activity|answer_key",
-      "filename": "page_N_type",
-      "imagePrompt": "string (detailed visual description for image generation)"
+Call the generate_worksheet_plan function with the complete plan.`
+
+  const TOOL_DEF = [{
+    type: 'function',
+    function: {
+      name: 'generate_worksheet_plan',
+      description: 'Generate a complete TPT worksheet plan with pages, content, and listing metadata',
+      parameters: {
+        type: 'object',
+        properties: {
+          setTitle: { type: 'string' },
+          subject: { type: 'string' },
+          gradeLevel: { type: 'string' },
+          pageCount: { type: 'integer' },
+          pages: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                pageNum: { type: 'integer' },
+                type: { type: 'string', enum: ['cover', 'worksheet', 'activity', 'answer_key'] },
+                sourcePageNum: { type: 'integer', description: 'answer_key pages only: pageNum of the worksheet/activity this page answers' },
+                filename: { type: 'string' },
+                imagePrompt: { type: 'string' },
+                content: {
+                  description: 'null for cover/answer_key pages. For worksheet/activity: include questions and optional imageSpec.',
+                  oneOf: [
+                    { type: 'null' },
+                    {
+                      type: 'object',
+                      properties: {
+                        imageSpec: { type: ['string', 'null'], description: 'Exact visual data for charts/graphs, else null' },
+                        questions: {
+                          type: 'array',
+                          items: {
+                            type: 'object',
+                            properties: {
+                              num: { type: 'integer' },
+                              question: { type: 'string' },
+                              answer: { type: 'string' },
+                            },
+                            required: ['num', 'question', 'answer'],
+                          },
+                        },
+                      },
+                      required: ['questions'],
+                    },
+                  ],
+                },
+              },
+              required: ['pageNum', 'type', 'filename', 'imagePrompt'],
+            },
+          },
+          tptListing: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              description: { type: 'string' },
+              keywords: { type: 'array', items: { type: 'string' } },
+              suggestedPrice: { type: 'number' },
+              subjectAreas: { type: 'array', items: { type: 'string' } },
+              tags: { type: 'array', items: { type: 'string' } },
+              teachingDuration: { type: 'string' },
+            },
+            required: ['title', 'description', 'keywords', 'suggestedPrice', 'subjectAreas', 'tags', 'teachingDuration'],
+          },
+        },
+        required: ['setTitle', 'subject', 'gradeLevel', 'pageCount', 'pages', 'tptListing'],
+      },
+    },
+  }]
+
+  const MAX_RETRIES = 2
+  let plan = null
+
+  for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+    const result = await withRetry(() => client.chat.completions.create({
+      model: 'gpt-4o',
+      max_tokens: 16000,
+      tools: TOOL_DEF,
+      tool_choice: { type: 'function', function: { name: 'generate_worksheet_plan' } },
+      messages: [{ role: 'user', content: prompt }],
+    }))
+
+    const toolCall = result.choices[0].message.tool_calls?.[0]
+    if (!toolCall) throw new Error('OpenAI did not return a tool call for generate_worksheet_plan')
+
+    const candidate = JSON.parse(toolCall.function.arguments)
+
+    try {
+      validate(candidate, maxPages, packageType)
+    } catch (err) {
+      if (attempt <= MAX_RETRIES) {
+        console.warn(`brainstorm validation (attempt ${attempt}/${MAX_RETRIES + 1}): ${err.message} — retrying`)
+        continue
+      }
+      throw err
     }
-  ],
-  "tptListing": {
-    "title": "string (SEO-optimised, include grade + subject + keywords)",
-    "description": "string",
-    "keywords": ["string"],
-    "suggestedPrice": number,
-    "subjectAreas": ["string (1–3 items, exact values from the allowed list above)"],
-    "tags": ["string (1–6 items, exact values from the allowed list above)"],
-    "teachingDuration": "string (e.g. '30 minutes', '45-60 minutes')"
-  }
-}`
 
-  const result = await withRetry(() => model.generateContent(prompt))
-  const raw = result.response.text()
-
-  let plan
-  try {
-    plan = JSON.parse(raw)
-  } catch {
-    throw new Error(`Gemini returned invalid JSON: ${raw.slice(0, 200)}`)
+    plan = candidate
+    break
   }
 
-  validate(plan, maxPages, packageType)
   if (packageType === 'free') plan.tptListing.suggestedPrice = 0
 
-  // Filter out any invalid values Gemini hallucinated
   plan.tptListing.subjectAreas = plan.tptListing.subjectAreas.filter(a => TPT_SUBJECT_AREAS.includes(a))
   plan.tptListing.tags = plan.tptListing.tags.filter(t => TPT_TAGS.includes(t))
+
+  // Auto-assign sourcePageNum by position for any answer_key missing it
+  const contentPages = plan.pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
+  plan.pages.filter(p => p.type === 'answer_key').forEach((ak, i) => {
+    if (!ak.sourcePageNum && i < contentPages.length) {
+      ak.sourcePageNum = contentPages[i].pageNum
+      console.warn(`Auto-assigned sourcePageNum=${ak.sourcePageNum} to answer_key p${ak.pageNum}`)
+    }
+  })
 
   return plan
 }
@@ -243,8 +326,14 @@ function validate(plan, maxPages, packageType) {
   const count = plan.pages.length
   if (count < range.min || count > pageMax)
     throw new Error(`pageCount ${count} out of range for ${packageType} (${range.min}–${pageMax})`)
-  if (plan.pages.at(-1).type !== 'answer_key')
-    throw new Error('Last page must be answer_key')
+  const contentPageCount = plan.pages.filter(p => p.type === 'worksheet' || p.type === 'activity').length
+  const akPages = plan.pages.filter(p => p.type === 'answer_key')
+  if (akPages.length === 0) throw new Error('No answer_key pages found')
+  if (akPages.length !== contentPageCount)
+    throw new Error(`answer_key count (${akPages.length}) must equal worksheet/activity count (${contentPageCount})`)
+  const firstAKIdx = plan.pages.findIndex(p => p.type === 'answer_key')
+  const nonAKAfterFirst = plan.pages.slice(firstAKIdx).filter(p => p.type !== 'answer_key')
+  if (nonAKAfterFirst.length > 0) throw new Error('All answer_key pages must be grouped at the end')
   if (!plan.tptListing?.title) throw new Error('Missing tptListing.title')
   const areas = plan.tptListing?.subjectAreas
   if (!Array.isArray(areas) || areas.length < 1)

@@ -1,27 +1,22 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import OpenAI from 'openai'
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY)
+const client = new OpenAI()
 
 async function withRetry(fn, maxAttempts = 4, baseDelayMs = 2000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       return await fn()
     } catch (err) {
-      const retryable = err.status === 503 || err.status === 429
+      const retryable = err.status === 429 || err.status === 503 || err.status === 500
       if (!retryable || attempt === maxAttempts) throw err
       const delay = baseDelayMs * 2 ** (attempt - 1)
-      console.warn(`Gemini ${err.status} on attempt ${attempt}/${maxAttempts} — retrying in ${delay}ms`)
+      console.warn(`OpenAI ${err.status} on attempt ${attempt}/${maxAttempts} — retrying in ${delay}ms`)
       await new Promise(r => setTimeout(r, delay))
     }
   }
 }
 
 export async function validatePage(page, buffer, plan = {}) {
-  const model = genAI.getGenerativeModel({
-    model: 'gemini-2.5-flash',
-    generationConfig: { responseMimeType: 'application/json' },
-  })
-
   const gradeLevel = plan.gradeLevel ?? 'unknown grade'
   const subject = plan.subject ?? 'general'
   const isAnswerKey = page.type === 'answer_key'
@@ -37,12 +32,16 @@ export async function validatePage(page, buffer, plan = {}) {
     }
 
     if (isAnswerKey) {
-      const allQA = (plan.pages ?? [])
-        .filter(p => p.content?.questions?.length > 0)
-        .flatMap(p => p.content.questions)
-      if (allQA.length > 0) {
-        const qaList = allQA.map(q => `${q.num}. Q: ${q.question} → Expected: ${q.answer}`).join('\n')
-        contentChecks += `\n7. The answer key shows correct answers matching these questions. Flag any missing or incorrect answer:\n${qaList}`
+      const sourcePage = page.sourcePageNum
+        ? (plan.pages ?? []).find(p => p.pageNum === page.sourcePageNum)
+        : null
+      const qaSource = sourcePage?.content?.questions?.length > 0
+        ? sourcePage.content.questions
+        : (plan.pages ?? []).filter(p => p.content?.questions?.length > 0).flatMap(p => p.content.questions)
+      if (qaSource.length > 0) {
+        const qaList = qaSource.map(q => `${q.num}. Q: ${q.question} → Expected: ${q.answer}`).join('\n')
+        const forLabel = sourcePage ? ` (answers for Page ${sourcePage.pageNum})` : ''
+        contentChecks += `\n7. The answer key${forLabel} shows correct answers matching these questions. Flag any missing or incorrect answer:\n${qaList}`
       } else {
         contentChecks += `\n7. Every answer shown is academically correct — verify math calculations, spelling, grammar, facts, or logic. Flag any incorrect answer.`
       }
@@ -58,31 +57,47 @@ Examine this worksheet image and check ALL of the following:
 4. Layout is clean and professional — readable font, no clutter
 5. If type is "answer_key": answers or solutions are visibly present${contentChecks}
 
-Return JSON only:
-{
-  "pass": true or false,
-  "issues": ["describe each problem here"]
-}
-
-If all checks pass, return { "pass": true, "issues": [] }`
+Call the check_worksheet_quality function with your assessment. If all checks pass, return pass: true with an empty issues array.`
 
   let result
   try {
-    result = await withRetry(() => model.generateContent([
-      prompt,
-      { inlineData: { mimeType: 'image/png', data: buffer.toString('base64') } },
-    ]))
+    result = await withRetry(() => client.chat.completions.create({
+      model: 'gpt-4o',
+      max_tokens: 1024,
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'check_worksheet_quality',
+          description: 'Report quality check results for a worksheet image',
+          parameters: {
+            type: 'object',
+            properties: {
+              pass: { type: 'boolean' },
+              issues: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['pass', 'issues'],
+          },
+        },
+      }],
+      tool_choice: { type: 'function', function: { name: 'check_worksheet_quality' } },
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: { url: `data:image/png;base64,${buffer.toString('base64')}` },
+          },
+          { type: 'text', text: prompt },
+        ],
+      }],
+    }))
   } catch (err) {
     console.warn(`validatePage failed after retries (${err.status ?? err.message}) — skipping`)
     return { pass: true, issues: [`validation skipped: ${err.status ?? err.message}`] }
   }
 
-  let validation
-  try {
-    validation = JSON.parse(result.response.text())
-  } catch {
-    return { pass: true, issues: ['validation parse error — skipping'] }
-  }
+  const toolCall = result.choices[0].message.tool_calls?.[0]
+  if (!toolCall) return { pass: true, issues: ['validation parse error — skipping'] }
 
-  return validation
+  return JSON.parse(toolCall.function.arguments)
 }

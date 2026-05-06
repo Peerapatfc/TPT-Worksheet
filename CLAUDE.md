@@ -8,7 +8,8 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 
 | Layer | Tool |
 |-------|------|
-| Brainstorm | Gemini 2.5 Flash (`@google/generative-ai`) |
+| Brainstorm | gpt-4o (`openai`) |
+| Content QA | gpt-4o (`openai`) |
 | Image generation | gpt-image-2 (`openai`) |
 | Image processing | sharp (grayscale post-process) |
 | PDF conversion | pdf-lib (pure Node, no system deps) |
@@ -20,15 +21,15 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 ## Key Architecture Decisions
 
 - **OAuth2 not service account** — personal Google Drive accounts have no service account storage quota. Uses `GOOGLE_OAUTH_REFRESH_TOKEN` instead.
-- **Gemini native JSON mode** — `responseMimeType: 'application/json'` is more reliable than prompt engineering for structured output.
+- **OpenAI tool use for structured JSON** — `tool_choice: {type: 'function', function: {name: '...'}}` forces structured output reliably. Used in brainstorm, generate-content, validate-page, reconcile-content. Parse with `JSON.parse(toolCall.function.arguments)`.
 - **gpt-image-2** — DALL-E 3 was retired March 2026. gpt-image-2 does not accept `response_format` param; always returns b64_json.
 - **Grayscale post-processing** — gpt-image-2 always generates color images. `sharp(buffer).grayscale()` enforces blackline printable output.
 - **Color PNG + Grayscale PDF** — PNGs stay color (TPT listing preview). `sharp().grayscale()` applied only when embedding into PDF (printable B&W). Both uploaded per page.
 - **Combined PDF** — merged all pages into `{slug}-complete-set.pdf`. TPT requires 1 uploadable file per listing; combined PDF serves this. Individual PDFs also uploaded for preview.
 - **gpt-image-2 size** — use `1024x1536` (portrait, closer to A4). `1024x1024` leaves large white margins after aspect-ratio fit to A4.
 - **Supabase for history** — GitHub Actions filesystem resets every run; local file won't persist. Drive file also works but Supabase is cleaner.
-- **Dynamic page count** — Gemini decides how many pages (min 2, max `MAX_PAGES_PER_SET`). Last page always `answer_key`.
-- **QA validation with retry** — after each image generation, Gemini vision validates layout/content. Retries up to 2× on fail, then logs warning and continues.
+- **Dynamic page count** — gpt-4o decides how many pages (min 2, max `MAX_PAGES_PER_SET`). Last page always `answer_key`.
+- **QA validation with retry** — after each image generation, gpt-4o vision validates layout/content. Retries up to 2× on fail, then logs warning and continues.
 - **3-tier package system** — `free` (3–8 pages, $0), `small` (10–20 pages, $2–5), `large` (20–`MAX_PAGES_PER_SET` pages, $5–15). Day-of-week routing: `FREE_WORKSHEET_DAY` → free, `LARGE_PACKAGE_DAY` → large, all others → small. All tracked in Supabase history.
 
 ## Scripts
@@ -36,9 +37,12 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 | File | Purpose |
 |------|---------|
 | `pipeline.js` | Orchestrator — calls all steps in order |
-| `brainstorm.js` | Gemini: pick topic + plan full page set (1 API call) |
+| `brainstorm.js` | gpt-4o: pick topic + plan full page set (1 API call) |
 | `generate-pages.js` | gpt-image-2 loop + sharp grayscale + validate |
-| `validate-page.js` | Gemini vision QA check per page |
+| `validate-page.js` | gpt-4o vision QA check per page |
+| `reconcile-content.js` | gpt-4o vision: correct Q&A answers against generated image |
+| `generate-content.js` | gpt-4o: generate + validate Q&A for worksheet pages |
+| `test-plan.js` | Dry-run: brainstorm + content only, no image/Drive/Telegram |
 | `convert-pdf.js` | pdf-lib: PNG Buffer → A4 PDF Buffer per page |
 | `upload-drive.js` | Google Drive: create folder, upload PNG+PDF+metadata |
 | `topic-history.js` | Supabase: read/write past topics |
@@ -52,7 +56,7 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 
 | Variable | Used by |
 |----------|---------|
-| `GEMINI_API_KEY` | brainstorm.js, validate-page.js |
+| `OPENAI_API_KEY` | brainstorm.js, generate-content.js, validate-page.js, reconcile-content.js, generate-pages.js |
 | `OPENAI_API_KEY` | generate-pages.js |
 | `GOOGLE_DRIVE_FOLDER_ID` | upload-drive.js (full assets folder) |
 | `GOOGLE_DRIVE_TPT_FOLDER_ID` | upload-drive.js (flat TPT folder — PDF only, optional) |
@@ -88,6 +92,7 @@ create table topic_history (
 ```bash
 cp .env.example .env   # fill all values
 npm install
+npm run test:plan                   # dry-run: brainstorm + content only
 node scripts/test-drive-upload.js   # verify Drive auth
 npm start                           # full pipeline run
 ```
