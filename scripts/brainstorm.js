@@ -145,7 +145,7 @@ export async function brainstorm(gradeLevel, maxPages, history = [], packageType
   const nOptions = {
     free:  'N = 2 or 4 (total pages: 4 or 7)',
     small: 'N = 8, 9, 10, 11, or 12 worksheets',
-    large: `N = 14 to ${largeMaxNEven} worksheets — choose based on topic depth`,
+    large: `N = 14 to ${largeMaxNEven} worksheets — MINIMUM is 14, fewer will be rejected`,
   }[packageType]
 
   const step2 = {
@@ -166,6 +166,8 @@ Each answer_key MUST have sourcePageNums set to an array of the 1–2 pageNums i
 - N diverse worksheet/activity pages (practice, application, challenge)
 - ceil(N/2) answer_key pages at the end — each covers 2 consecutive worksheets (last may cover 1 if N is odd)
 Valid values: ${nOptions}
+Page count formula: total = 1 + N + ceil(N/2). Examples: N=14 → 22 pages, N=18 → 28 pages, N=22 → 34 pages.
+CRITICAL: N must be at least 14. N=12 gives only 19 pages which will be REJECTED.
 Each answer_key MUST have sourcePageNums set to an array of the 1–2 pageNums it answers (e.g. [2,3] or [4]).`,
   }[packageType]
 
@@ -279,16 +281,25 @@ Call the generate_worksheet_plan function with the complete plan.`
     },
   }]
 
-  const MAX_RETRIES = 2
+  const MAX_RETRIES = 3
   let plan = null
+  let lastError = null
 
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+    const messages = [{ role: 'user', content: prompt }]
+    if (lastError) {
+      messages.push({
+        role: 'user',
+        content: `RETRY REQUIRED: Your previous plan was rejected — ${lastError}. Fix the issue and call generate_worksheet_plan again with a valid plan.`,
+      })
+    }
+
     const result = await withRetry(() => client.chat.completions.create({
       model: 'gpt-4o',
       max_tokens: 16000,
       tools: TOOL_DEF,
       tool_choice: { type: 'function', function: { name: 'generate_worksheet_plan' } },
-      messages: [{ role: 'user', content: prompt }],
+      messages,
     }))
 
     const toolCall = result.choices[0].message.tool_calls?.[0]
@@ -298,7 +309,9 @@ Call the generate_worksheet_plan function with the complete plan.`
 
     try {
       validate(candidate, maxPages, packageType)
+      lastError = null
     } catch (err) {
+      lastError = err.message
       if (attempt <= MAX_RETRIES) {
         console.warn(`brainstorm validation (attempt ${attempt}/${MAX_RETRIES + 1}): ${err.message} — retrying`)
         continue
