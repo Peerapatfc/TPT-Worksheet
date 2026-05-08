@@ -118,9 +118,9 @@ const TPT_TAGS = [
 ]
 
 const PAGE_RANGES = {
-  free:  { min: 4,  max: 7  },
-  small: { min: 10, max: 19 },
-  large: { min: 19, max: null },
+  free:  { min: 3,  max: 8  },
+  small: { min: 12, max: 20 },
+  large: { min: 21, max: null },
 }
 
 export async function brainstorm(gradeLevel, maxPages, history = [], packageType = 'small') {
@@ -144,29 +144,29 @@ export async function brainstorm(gradeLevel, maxPages, history = [], packageType
   const largeMaxNEven = (() => { const n = Math.floor((pageMax - 1) / 1.5); return n % 2 === 0 ? n : n - 1 })()
   const nOptions = {
     free:  'N = 2 or 4 (total pages: 4 or 7)',
-    small: 'N = 6, 8, 10, or 12 (total pages: 10, 13, 16, or 19)',
-    large: `N = 12, 14, 16, or ${largeMaxNEven} (total pages up to ${pageMax})`,
+    small: 'N = 8, 9, 10, 11, or 12 worksheets',
+    large: `N = 14 to ${largeMaxNEven} worksheets — choose based on topic depth`,
   }[packageType]
 
   const step2 = {
     free: `Step 2: Pick the single best topic. Create a standalone worksheet set with EXACTLY this structure:
 - 1 cover page (type "cover")
-- N worksheet/activity pages (N must be even)
-- N/2 answer_key pages at the end — each covers EXACTLY 2 consecutive worksheets
+- N worksheet/activity pages
+- ceil(N/2) answer_key pages at the end — each covers 2 consecutive worksheets (last may cover 1 if N is odd)
 Valid values: ${nOptions}
-Each answer_key MUST have sourcePageNums set to an array of the 2 pageNums it answers (e.g. [2,3]).`,
+Each answer_key MUST have sourcePageNums set to an array of the 1–2 pageNums it answers (e.g. [2,3] or [4]).`,
     small: `Step 2: Pick the single best topic (highest sellability + grade-appropriateness + originality). Use EXACTLY this structure:
 - 1 cover page (type "cover")
-- N worksheet/activity pages (N must be even)
-- N/2 answer_key pages at the end — each covers EXACTLY 2 consecutive worksheets
+- N worksheet/activity pages
+- ceil(N/2) answer_key pages at the end — each covers 2 consecutive worksheets (last may cover 1 if N is odd)
 Valid values: ${nOptions}
-Each answer_key MUST have sourcePageNums set to an array of the 2 pageNums it answers (e.g. [2,3]).`,
+Each answer_key MUST have sourcePageNums set to an array of the 1–2 pageNums it answers (e.g. [2,3] or [4]).`,
     large: `Step 2: Pick the single best topic (highest sellability + grade-appropriateness + originality). Use EXACTLY this structure:
 - 1 cover page (type "cover")
-- N diverse worksheet/activity pages (practice, application, challenge; N must be even)
-- N/2 answer_key pages at the end — each covers EXACTLY 2 consecutive worksheets
+- N diverse worksheet/activity pages (practice, application, challenge)
+- ceil(N/2) answer_key pages at the end — each covers 2 consecutive worksheets (last may cover 1 if N is odd)
 Valid values: ${nOptions}
-Each answer_key MUST have sourcePageNums set to an array of the 2 pageNums it answers (e.g. [2,3]).`,
+Each answer_key MUST have sourcePageNums set to an array of the 1–2 pageNums it answers (e.g. [2,3] or [4]).`,
   }[packageType]
 
   const priceInstruction = {
@@ -312,6 +312,12 @@ Call the generate_worksheet_plan function with the complete plan.`
 
   if (packageType === 'free') plan.tptListing.suggestedPrice = 0
 
+  plan.pageCount = plan.pages.length
+
+  for (const p of plan.pages) {
+    if (!p.filename.endsWith('.png')) p.filename = p.filename.replace(/\.[^.]+$/, '') + '.png'
+  }
+
   plan.tptListing.subjectAreas = plan.tptListing.subjectAreas.filter(a => TPT_SUBJECT_AREAS.includes(a))
   plan.tptListing.tags = plan.tptListing.tags.filter(t => TPT_TAGS.includes(t))
 
@@ -341,10 +347,9 @@ function validate(plan, maxPages, packageType) {
   const contentPageCount = plan.pages.filter(p => p.type === 'worksheet' || p.type === 'activity').length
   const akPages = plan.pages.filter(p => p.type === 'answer_key')
   if (akPages.length === 0) throw new Error('No answer_key pages found')
-  if (contentPageCount % 2 !== 0)
-    throw new Error(`worksheet/activity count (${contentPageCount}) must be even for 2:1 answer key pairing`)
-  if (akPages.length !== contentPageCount / 2)
-    throw new Error(`answer_key count (${akPages.length}) must equal half of worksheet/activity count (${contentPageCount})`)
+  const expectedAK = Math.ceil(contentPageCount / 2)
+  if (akPages.length !== expectedAK)
+    throw new Error(`answer_key count (${akPages.length}) must equal ceil(${contentPageCount}/2) = ${expectedAK}`)
   const firstAKIdx = plan.pages.findIndex(p => p.type === 'answer_key')
   const nonAKAfterFirst = plan.pages.slice(firstAKIdx).filter(p => p.type !== 'answer_key')
   if (nonAKAfterFirst.length > 0) throw new Error('All answer_key pages must be grouped at the end')

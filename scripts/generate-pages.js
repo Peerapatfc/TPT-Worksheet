@@ -67,7 +67,8 @@ function buildPrompt(plan, page) {
     const questions = sourcePages.length > 0
       ? sourcePages.flatMap(p => p.content?.questions ?? [])
       : plan.pages.filter(p => p.content?.questions?.length > 0).flatMap(p => p.content.questions)
-    const qaLines = questions.map(q => `${q.num}. ${q.question} → ${q.answer}`)
+    let seq = 1
+    const qaLines = questions.map(q => `${seq++}. ${q.question} → ${q.answer}`)
     if (qaLines.length > 0) {
       const forLabel = nums.length > 0 ? ` for Pages ${nums.join(' & ')}` : ''
       contentBlock = ` Answers${forLabel} — text only, do not redraw any diagrams:\n${qaLines.join('\n')}`
