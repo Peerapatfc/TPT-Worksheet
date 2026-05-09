@@ -104,3 +104,15 @@ npm start                           # full pipeline run
 - **OAuth2 consent screen** — before running `get-refresh-token.js`, add your Gmail as a test user in Google Cloud Console → OAuth consent screen → Test users. Otherwise get `403 access_denied`.
 - **`FREE_WORKSHEET_DAY` / `LARGE_PACKAGE_DAY`** — set as GitHub **Variables** (not Secrets). `FREE_WORKSHEET_DAY` triggers free tier (3–8 pages, $0). `LARGE_PACKAGE_DAY` triggers large tier (20–`MAX_PAGES_PER_SET` pages). All other days = small tier (10–20 pages). Both can be the same day only if you want to override (free takes priority).
 - **`GOOGLE_DRIVE_TPT_FOLDER_ID`** — TPT Drive integration rejects PNGs, JSON, TXT. Use a separate flat folder containing only PDFs. Each run uploads `{slug}-complete-set.pdf` there. Link THIS folder to TPT, not `GOOGLE_DRIVE_FOLDER_ID`.
+- **Preview PDF** — `convert-pdf.js` builds `{slug}-preview.pdf`: cover + first 3 worksheet/activity pages, color, diagonal PREVIEW watermark. Uploaded alongside combined PDFs. Upload this file to TPT "Product Previews" slot manually each listing.
+- **Education standards** — `brainstorm.js` outputs `plan.educationStandards: { framework, codes }`. Math/ELA → CCSS codes, Science → NGSS codes, other → null. Written to `tpt-listing.txt` under "EDUCATION STANDARDS". Copy-paste into TPT "Select CCSS/NGSS" when listing.
+
+## TPT Listing — Static Field Answers
+
+These never change run-to-run; always fill them the same way:
+
+| Field | Value |
+|-------|-------|
+| Format | `PDF` + `Image` |
+| Tax Code | `Digital books sold to an end user with rights for permanent use` |
+| Subject Area | Leaf nodes only — category headers (Art, English Language Arts, etc.) are NOT selectable |
