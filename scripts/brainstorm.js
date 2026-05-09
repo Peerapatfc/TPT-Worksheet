@@ -205,6 +205,14 @@ Step 6: For every worksheet and activity page, populate the "content" field:
 - cover and answer_key pages: set content to null.
 The answer key image will be generated using ONLY these questions and answers — so they must be complete and correct.
 
+Step 7: For educationStandards, pick 2–5 specific standard codes that this resource FULLY covers:
+- Math or ELA subject → framework: "CCSS", codes using exact format:
+  - Math: "CCSS.MATH.CONTENT.[K or 1-6].[DOMAIN].[CLUSTER].[STANDARD]" (e.g. "CCSS.MATH.CONTENT.3.OA.A.1")
+  - ELA: "CCSS.ELA-LITERACY.[STRAND].[GRADE].[STANDARD]" (e.g. "CCSS.ELA-LITERACY.RL.3.1")
+- Science subject → framework: "NGSS", codes using exact format: "[K or 1-6]-[DisciplineCode][Topic]-[N]" (e.g. "3-LS1-1", "K-ESS2-1")
+- Any other subject → framework: null, codes: []
+Rules: only codes the resource FULLY covers (no partial alignment). Grade must match the worksheet's gradeLevel. Max 5 codes.
+
 Rules for tptListing fields:
 - description: ${descriptionInstruction}
 - suggestedPrice: ${priceInstruction}
@@ -275,8 +283,16 @@ Call the generate_worksheet_plan function with the complete plan.`
             },
             required: ['title', 'description', 'keywords', 'suggestedPrice', 'subjectAreas', 'tags', 'teachingDuration'],
           },
+          educationStandards: {
+            type: 'object',
+            properties: {
+              framework: { type: ['string', 'null'], enum: ['CCSS', 'NGSS', null] },
+              codes: { type: 'array', items: { type: 'string' }, description: 'Specific standard codes, max 5, only fully-covered standards' },
+            },
+            required: ['framework', 'codes'],
+          },
         },
-        required: ['setTitle', 'subject', 'gradeLevel', 'pageCount', 'pages', 'tptListing'],
+        required: ['setTitle', 'subject', 'gradeLevel', 'pageCount', 'pages', 'tptListing', 'educationStandards'],
       },
     },
   }]

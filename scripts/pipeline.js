@@ -42,10 +42,10 @@ async function main() {
   const pages = await generatePages(planWithContent)
   appendLog({ step: 'generate_images', status: 'ok', generated: pages.length })
 
-  const { pagesWithPdf, combinedPdfBuffer, colorCombinedPdfBuffer } = await convertPdfs(pages)
+  const { pagesWithPdf, combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer } = await convertPdfs(pages)
   appendLog({ step: 'convert_pdf', status: 'ok' })
 
-  const folder = await uploadDrive(plan, pagesWithPdf, combinedPdfBuffer, colorCombinedPdfBuffer, runDate)
+  const folder = await uploadDrive(plan, pagesWithPdf, combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer, runDate)
   appendLog({ step: 'upload_drive', status: 'ok', folderLink: folder.link })
 
   await saveTopicEntry({
