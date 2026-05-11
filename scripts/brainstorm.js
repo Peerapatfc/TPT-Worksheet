@@ -199,13 +199,15 @@ ${tagList}
 
 Step 5: Estimate teachingDuration in minutes (e.g. "30 minutes", "45-60 minutes") based on page count and activity complexity.
 
-Step 6: For every worksheet and activity page, populate the "content" field:
+Step 6: Pick a themeColor — one hex color code (e.g. "#1B4F8A", "#2E7D32", "#6A1B9A") that matches the topic's mood. Must be a dark, saturated color suitable for a professional worksheet border and header bar. This exact hex will be used on EVERY page of this set.
+
+Step 7: For every worksheet and activity page, populate the "content" field:
 - "questions": array of EVERY question/exercise on that page with its correct answer. Number them sequentially across ALL worksheet/activity pages (q1, q2, q3... continuing from page to page — do NOT restart at 1 per page).
 - "imageSpec": if the page contains a picture graph, bar chart, tally chart, data table, or number line with specific values — describe the EXACT values (e.g. "picture graph: cats=5, dogs=8, fish=3"). Otherwise set null.
 - cover and answer_key pages: set content to null.
 The answer key image will be generated using ONLY these questions and answers — so they must be complete and correct.
 
-Step 7: For educationStandards, pick 2–5 specific standard codes that this resource FULLY covers:
+Step 8: For educationStandards, pick 2–5 specific standard codes that this resource FULLY covers:
 - Math or ELA subject → framework: "CCSS", codes using exact format:
   - Math: "CCSS.MATH.CONTENT.[K or 1-6].[DOMAIN].[CLUSTER].[STANDARD]" (e.g. "CCSS.MATH.CONTENT.3.OA.A.1")
   - ELA: "CCSS.ELA-LITERACY.[STRAND].[GRADE].[STANDARD]" (e.g. "CCSS.ELA-LITERACY.RL.3.1")
@@ -230,6 +232,7 @@ Call the generate_worksheet_plan function with the complete plan.`
           setTitle: { type: 'string' },
           subject: { type: 'string' },
           gradeLevel: { type: 'string' },
+          themeColor: { type: 'string', description: 'Hex color code for border and header bar on all pages, e.g. "#1B4F8A". Must be dark and saturated.', pattern: '^#[0-9A-Fa-f]{6}$' },
           pageCount: { type: 'integer' },
           pages: {
             type: 'array',
@@ -292,7 +295,7 @@ Call the generate_worksheet_plan function with the complete plan.`
             required: ['framework', 'codes'],
           },
         },
-        required: ['setTitle', 'subject', 'gradeLevel', 'pageCount', 'pages', 'tptListing', 'educationStandards'],
+        required: ['setTitle', 'subject', 'gradeLevel', 'themeColor', 'pageCount', 'pages', 'tptListing', 'educationStandards'],
       },
     },
   }]

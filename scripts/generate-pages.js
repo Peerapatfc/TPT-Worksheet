@@ -6,7 +6,9 @@ import { reconcilePageContent } from './reconcile-content.js'
 const client = new OpenAI()
 const MAX_ATTEMPTS = 5
 
-const BASE_STYLE = 'Portrait orientation, A4 printable worksheet. Clean sans-serif font, thick border frame. Colorful and engaging design. Professional TPT layout.'
+const BASE_STYLE = 'Portrait orientation, A4 printable worksheet. Clean sans-serif font. Colorful and engaging design. Professional TPT layout.'
+
+const frameStyle = (hex) => `BORDER FRAME: thick solid rectangle border around entire page, color exactly ${hex}. HEADER BAR: filled rectangle at top, background color exactly ${hex}, white bold text only — no colored badges, no colored pills, no highlights on individual header items. Use this exact color ${hex} for border and header bar on this page.`
 
 const TYPE_STYLE = {
   cover: 'COVER PAGE: Large decorative title centered on page. Student name line and date line below title. Decorative thematic border or illustration. NO questions, NO exercises, NO answer spaces. Title page only.',
@@ -83,5 +85,5 @@ function buildPrompt(plan, page) {
     contentBlock = specPart + qPart
   }
 
-  return `${BASE_STYLE} ${typeStyle} Header bar: ${headerInfo}. ${page.imagePrompt}${contentBlock}`.trim()
+  return `${BASE_STYLE} ${frameStyle(plan.themeColor)} ${typeStyle} Header bar: ${headerInfo}. ${page.imagePrompt}${contentBlock}`.trim()
 }
