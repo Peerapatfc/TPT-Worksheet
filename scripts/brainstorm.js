@@ -123,7 +123,7 @@ const PAGE_RANGES = {
   large: { min: 21, max: null },
 }
 
-export async function brainstorm(gradeLevel, maxPages, history = [], packageType = 'small') {
+export async function brainstorm(gradeLevel, maxPages, history = [], packageType = 'small', currentMonth = '') {
   const historyBlock =
     history.length > 0
       ? `\nPREVIOUSLY GENERATED TOPICS — do NOT repeat or create anything similar in subject, title, or keywords:\n${history
@@ -177,15 +177,26 @@ Each answer_key MUST have sourcePageNums set to an array of the 1–2 pageNums i
     large: `suggestedPrice: realistic TPT price for a comprehensive unit (e.g. 5.00–15.00).`,
   }[packageType]
 
-  const descriptionInstruction = {
-    free:  `2-3 sentences describing this worksheet set for TPT.`,
-    small: `2-3 sentences describing this small worksheet packet for TPT.`,
-    large: `2-3 sentences describing this comprehensive worksheet unit for TPT, emphasising depth and variety.`,
-  }[packageType]
+  const sorLanguage = `For ELA, Reading, Phonics, Sight Words, Balanced Literacy, or Science of Reading subjects: include the phrase "Science of Reading aligned" or "SOR-aligned" in sentence 1 or 2.`
+  const seasonalLanguage = currentMonth ? `If this topic is seasonally relevant to ${currentMonth}: mention it naturally (e.g. "Perfect for ${currentMonth} centers" or "Great for ${currentMonth.toLowerCase()} practice").` : ''
+
+  const descriptionInstruction = `Write a 5–7 sentence TPT product description in this exact order:
+1. Hook: what skill/concept this helps students practice and why teachers will value it.
+2. What's included: mention the total page count (from your plan), the number of no-prep worksheets/activity pages, and that answer keys are included for every page.
+3. Who it's for and best use cases: grade level plus 3–4 ideal contexts (whole class, small groups, literacy/math centers, homework, morning work, sub plans, or intervention).
+4. Ease of use: start with "Print and go — no prep needed." Add 1–2 specific use scenarios.
+5. Skills covered: list 3–5 specific skills from the pages you planned, in natural sentence form.
+6. Standards (conditional): if Math or ELA subject, write "Aligned to Common Core State Standards (CCSS)." If Science, write "Aligned to Next Generation Science Standards (NGSS)." Otherwise omit this sentence entirely.
+7. Close: end with "Answer key included for all pages."
+${sorLanguage}
+${seasonalLanguage}`
+
+  const seasonalContextBlock = currentMonth
+    ? `Current month: ${currentMonth}. Favor topics that are seasonally relevant or timely for this month if a strong seasonal angle exists. If no strong seasonal angle, pick the best topic regardless of season.\n\n`
+    : ''
 
   const prompt = `You are a curriculum designer for Teachers Pay Teachers (TPT).
-${historyBlock}
-Step 1: Generate 3 candidate printable worksheet topics ${gradeInstruction}.
+${historyBlock}${seasonalContextBlock}Step 1: Generate 3 candidate printable worksheet topics ${gradeInstruction}.
 For each include: title, subject, gradeLevel (specific, e.g. "Grade 2"), learningObjective, sellabilityScore (1-10), reason.
 Pick topics that are DIFFERENT from the previously generated list above.
 
@@ -194,8 +205,9 @@ ${step2}
 Step 3: For the tptListing, pick 1–3 subjectAreas from this exact list ONLY (use exact strings):
 ${subjectList}
 
-Step 4: For tptListing.tags, pick 1–6 tags from this exact list ONLY (use exact strings):
+Step 4: For tptListing.tags, pick 2–6 tags from this exact list ONLY (use exact strings):
 ${tagList}
+REQUIRED: "Printables" and "Worksheets" must always be included. Add seasonal tags (e.g. "Spring", "Back to School", "End of Year") when relevant to the topic.
 
 Step 5: Estimate teachingDuration in minutes (e.g. "30 minutes", "45-60 minutes") based on page count and activity complexity.
 
@@ -216,6 +228,22 @@ Step 8: For educationStandards, pick 2–5 specific standard codes that this res
 Rules: only codes the resource FULLY covers (no partial alignment). Grade must match the worksheet's gradeLevel. Max 5 codes.
 
 Rules for tptListing fields:
+- title: Follow this pattern: "{Topic} {Product Type} | {Grade Level} | {Key Differentiator}"
+  • {Product Type}: use "Worksheets", "Activities Packet", "Unit", "Practice Pages", or "Activity Pack"
+  • {Grade Level}: always include, e.g. "Grade 3" or "Grades 2–3"
+  • {Key Differentiator}: always include "No Prep Printable"; for ELA/Reading/Phonics/Sight Words topics also add "SOR-Aligned"; for Math topics with CCSS also add "Common Core"
+  • Front-load the most-searchable keyword (the main topic/skill name)
+  • Keep the full title under 80 characters
+  Examples: "CVC Word Families Worksheets | Kindergarten | No Prep SOR-Aligned Printable"
+            "Multiplication Facts Practice | Grade 3 | No Prep Common Core Printable"
+            "Community Helpers Activities Packet | Grade 1 | No Prep Printable"
+- keywords: Aim for 10–15 keywords. Always include:
+  • Format keywords: "no prep worksheets", "print and go", "printable worksheets", "no prep printable"
+  • Grade+subject combos, e.g. "grade 3 math worksheets", "kindergarten reading activities"
+  • Answer key: "worksheets with answer key"
+  • For ELA/Reading/Phonics/Sight Words: "science of reading", "SOR aligned" (when relevant)
+  • For Math with CCSS: "common core math", "common core worksheets"
+  • Topic-specific skill/concept words${currentMonth ? `\n  • Seasonal (if topic suits ${currentMonth}): e.g. "${currentMonth.toLowerCase()} worksheets", "${currentMonth.toLowerCase()} activities"` : ''}
 - description: ${descriptionInstruction}
 - suggestedPrice: ${priceInstruction}
 
@@ -276,9 +304,9 @@ Call the generate_worksheet_plan function with the complete plan.`
           tptListing: {
             type: 'object',
             properties: {
-              title: { type: 'string' },
+              title: { type: 'string', description: 'Must follow pattern: "{Topic} {Product Type} | {Grade Level} | {Key Differentiator}". Product Type: Worksheets/Activities Packet/Practice Pages/Unit. Grade Level: e.g. "Grade 3" or "Grades 2–3". Key Differentiator: always "No Prep Printable"; add "SOR-Aligned" for ELA/Phonics/Reading; add "Common Core" for Math+CCSS. Front-load main keyword. Max 80 chars. Example: "Fractions Worksheets | Grade 3 | No Prep Common Core Printable"' },
               description: { type: 'string' },
-              keywords: { type: 'array', items: { type: 'string' } },
+              keywords: { type: 'array', items: { type: 'string' }, minItems: 10, maxItems: 15 },
               suggestedPrice: { type: 'number' },
               subjectAreas: { type: 'array', items: { type: 'string' } },
               tags: { type: 'array', items: { type: 'string' } },

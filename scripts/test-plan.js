@@ -14,13 +14,17 @@ async function main() {
   console.log(`[test-plan] history: ${history.length} past topics`)
 
   console.log('\n--- BRAINSTORM ---')
-  const plan = await brainstorm(gradeLevel, maxPages, history, packageType)
+  const currentMonth = new Date().toLocaleString('en-US', { month: 'long' })
+  const plan = await brainstorm(gradeLevel, maxPages, history, packageType, currentMonth)
 
-  console.log(`Title:    ${plan.setTitle}`)
-  console.log(`Grade:    ${plan.gradeLevel}  Subject: ${plan.subject}`)
-  console.log(`Pages:    ${plan.pageCount}   Price: $${plan.tptListing.suggestedPrice}`)
-  console.log(`Duration: ${plan.tptListing.teachingDuration}`)
-  console.log(`Tags:     ${plan.tptListing.tags.join(', ')}`)
+  console.log(`Set Title:  ${plan.setTitle}`)
+  console.log(`TPT Title:  ${plan.tptListing.title}`)
+  console.log(`Grade:      ${plan.gradeLevel}  Subject: ${plan.subject}`)
+  console.log(`Pages:      ${plan.pageCount}   Price: $${plan.tptListing.suggestedPrice}`)
+  console.log(`Duration:   ${plan.tptListing.teachingDuration}`)
+  console.log(`Tags:       ${plan.tptListing.tags.join(', ')}`)
+  console.log(`Keywords:   ${plan.tptListing.keywords.join(', ')}`)
+  console.log(`\nDescription:\n${plan.tptListing.description}`)
   console.log('\nPage plan:')
   for (const p of plan.pages) {
     const extra = p.sourcePageNums?.length ? ` → answers p${p.sourcePageNums.join('+p')}` : ''

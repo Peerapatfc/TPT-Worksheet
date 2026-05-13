@@ -91,6 +91,10 @@ export async function uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedP
     ? ['', `EDUCATION STANDARDS (${standards.framework}):`, ...standards.codes.map(c => `  ${c}`)]
     : ['', 'EDUCATION STANDARDS: N/A (not Math, ELA, or Science)']
 
+  const worksheetPages = plan.pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
+  const answerKeyPages = plan.pages.filter(p => p.type === 'answer_key')
+  const totalQuestions = worksheetPages.reduce((sum, p) => sum + (p.content?.questions?.length ?? 0), 0)
+
   const tptText = [
     `TITLE: ${plan.tptListing.title}`,
     '',
@@ -106,10 +110,18 @@ export async function uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedP
     '',
     `GRADE LEVEL: ${plan.gradeLevel}`,
     `SUBJECT: ${plan.subject}`,
-    `FORMAT: Printable`,
+    `FORMAT: PDF | No Prep | Print & Go | Answer Key Included`,
     `PAGES: ${plan.pageCount} (includes answer key)`,
     `ANSWER KEY: Yes`,
     `TEACHING DURATION: ${plan.tptListing.teachingDuration}`,
+    '',
+    `WHAT'S INCLUDED:`,
+    `  • ${worksheetPages.length} No-Prep Worksheet/Activity Pages`,
+    `  • ${answerKeyPages.length} Answer Key Page(s)`,
+    `  • ${plan.pageCount} Total Pages`,
+    ...(totalQuestions > 0 ? [`  • ${totalQuestions}+ Practice Problems/Questions`] : []),
+    `  • PDF Format — Print & Go, No Prep Needed`,
+    `  • Answer Key Included for All Pages`,
     ...standardsLines,
   ].join('\n')
 

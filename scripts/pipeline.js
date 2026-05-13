@@ -28,11 +28,13 @@ async function main() {
   const history = await readTopicHistory()
   appendLog({ step: 'load_history', status: 'ok', count: history.length })
 
+  const currentMonth = new Date().toLocaleString('en-US', { month: 'long' })
   const plan = await brainstorm(
     process.env.GRADE_LEVEL || null,
     parseInt(process.env.MAX_PAGES_PER_SET ?? '30', 10),
     history,
     packageType,
+    currentMonth,
   )
   appendLog({ step: 'brainstorm', status: 'ok', topic: plan.setTitle, pageCount: plan.pageCount, packageType })
 
