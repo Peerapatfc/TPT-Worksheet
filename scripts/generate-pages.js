@@ -6,6 +6,20 @@ import { reconcilePageContent } from './reconcile-content.js'
 const client = new OpenAI()
 const MAX_ATTEMPTS = 5
 
+async function withRetry(fn, maxAttempts = 4, baseDelayMs = 2000) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      const retryable = err.status === 429 || err.status === 503 || err.status === 500
+      if (!retryable || attempt === maxAttempts) throw err
+      const delay = baseDelayMs * 2 ** (attempt - 1)
+      console.warn(`OpenAI ${err.status} on attempt ${attempt}/${maxAttempts} — retrying in ${delay}ms`)
+      await new Promise(r => setTimeout(r, delay))
+    }
+  }
+}
+
 const BASE_STYLE = {
   cover:      'Square format, professional educator resource cover. Clean bold typography. Colorful and engaging design. NO questions, NO lines, NO answer spaces.',
   default:    'Portrait orientation, A4 printable worksheet. Clean sans-serif font. Colorful and engaging design. Professional TPT layout.',
@@ -28,13 +42,14 @@ export async function generatePages(plan) {
     let buffer
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      const response = await client.images.generate({
+      const response = await withRetry(() => client.images.generate({
         model: 'gpt-image-2',
         prompt,
         size: page.type === 'cover' ? '1024x1024' : '1024x1536',
         quality: 'medium',
-      })
+      }))
 
+      if (!response.data?.[0]?.b64_json) throw new Error(`OpenAI image API returned no data for page ${page.pageNum}`)
       buffer = Buffer.from(response.data[0].b64_json, 'base64')
 
       const validation = await validatePage(page, buffer, plan)
