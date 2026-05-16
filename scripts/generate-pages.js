@@ -6,7 +6,10 @@ import { reconcilePageContent } from './reconcile-content.js'
 const client = new OpenAI()
 const MAX_ATTEMPTS = 5
 
-const BASE_STYLE = 'Portrait orientation, A4 printable worksheet. Clean sans-serif font. Colorful and engaging design. Professional TPT layout.'
+const BASE_STYLE = {
+  cover:      'Square format, professional educator resource cover. Clean bold typography. Colorful and engaging design. NO questions, NO lines, NO answer spaces.',
+  default:    'Portrait orientation, A4 printable worksheet. Clean sans-serif font. Colorful and engaging design. Professional TPT layout.',
+}
 
 const frameStyle = (hex) => `BORDER FRAME: thick solid rectangle border around entire page, color exactly ${hex}. HEADER BAR: filled rectangle at top, background color exactly ${hex}, white bold text only — no colored badges, no colored pills, no highlights on individual header items. Use this exact color ${hex} for border and header bar on this page.`
 
@@ -28,7 +31,7 @@ export async function generatePages(plan) {
       const response = await client.images.generate({
         model: 'gpt-image-2',
         prompt,
-        size: '1024x1536',
+        size: page.type === 'cover' ? '1024x1024' : '1024x1536',
         quality: 'medium',
       })
 
@@ -85,5 +88,6 @@ function buildPrompt(plan, page) {
     contentBlock = specPart + qPart
   }
 
-  return `${BASE_STYLE} ${frameStyle(plan.themeColor)} ${typeStyle} Header bar: ${headerInfo}. ${page.imagePrompt}${contentBlock}`.trim()
+  const baseStyle = BASE_STYLE[page.type] ?? BASE_STYLE.default
+  return `${baseStyle} ${frameStyle(plan.themeColor)} ${typeStyle} Header bar: ${headerInfo}. ${page.imagePrompt}${contentBlock}`.trim()
 }

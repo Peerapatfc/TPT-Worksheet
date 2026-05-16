@@ -2,6 +2,7 @@ import 'dotenv/config'
 import { brainstorm } from './brainstorm.js'
 import { generateContent } from './generate-content.js'
 import { generatePages } from './generate-pages.js'
+import { generateMarketingSlides } from './generate-marketing-slides.js'
 import { convertPdfs } from './convert-pdf.js'
 import { uploadDrive } from './upload-drive.js'
 import { notifyTelegram } from './notify-telegram.js'
@@ -41,13 +42,16 @@ async function main() {
   const planWithContent = await generateContent(plan)
   appendLog({ step: 'generate_content', status: 'ok' })
 
-  const pages = await generatePages(planWithContent)
+  const [pages, marketingSlides] = await Promise.all([
+    generatePages(planWithContent),
+    generateMarketingSlides(planWithContent),
+  ])
   appendLog({ step: 'generate_images', status: 'ok', generated: pages.length })
 
   const { pagesWithPdf, combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer } = await convertPdfs(pages)
   appendLog({ step: 'convert_pdf', status: 'ok' })
 
-  const folder = await uploadDrive(plan, pagesWithPdf, combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer, runDate)
+  const folder = await uploadDrive(plan, pagesWithPdf, combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer, runDate, marketingSlides)
   appendLog({ step: 'upload_drive', status: 'ok', folderLink: folder.link })
 
   await saveTopicEntry({

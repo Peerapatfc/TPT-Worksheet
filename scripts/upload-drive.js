@@ -44,7 +44,7 @@ async function uploadBuffer(drive, buffer, filename, mimeType, folderId) {
   return res.data
 }
 
-export async function uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer, runDate) {
+export async function uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer, runDate, marketingSlides = []) {
   const drive = getDrive()
   const parentId = process.env.GOOGLE_DRIVE_FOLDER_ID
   const setSlug = `${slugify(plan.setTitle)}-${randomUUID().slice(0, 8)}`
@@ -59,6 +59,11 @@ export async function uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedP
     const pdfFile = await uploadBuffer(drive, page.pdfBuffer, `${page.filename}.pdf`, 'application/pdf', folderId)
     fileIds[page.filename] = { png: pngFile.id, pdf: pdfFile.id }
     console.log(`Uploaded ${page.filename} (PNG + PDF)`)
+  }
+
+  for (const slide of marketingSlides) {
+    await uploadBuffer(drive, slide.buffer, `${slide.filename}.png`, 'image/png', folderId)
+    console.log(`Uploaded ${slide.filename}.png`)
   }
 
   const metadata = {
