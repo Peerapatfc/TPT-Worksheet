@@ -21,15 +21,19 @@ async function withRetry(fn, maxAttempts = 4, baseDelayMs = 2000) {
   }
 }
 const LOGO_PATH = join(__dirname, '..', 'logo.png')
-const LOGO_SIZE = 150
-const LOGO_MARGIN = 18
+const LOGO_SIZE = 80
+const LOGO_MARGIN = 20
 
 async function compositeLogo(slideBuffer) {
   if (!existsSync(LOGO_PATH)) return slideBuffer
-  const logoBuffer = await sharp(LOGO_PATH)
+  const { data, info } = await sharp(LOGO_PATH)
     .resize(LOGO_SIZE, LOGO_SIZE, { fit: 'contain', background: { r: 255, g: 255, b: 255, alpha: 0 } })
-    .png()
-    .toBuffer()
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+  const pixels = new Uint8Array(data)
+  for (let i = 3; i < pixels.length; i += 4) pixels[i] = Math.round(pixels[i] * 0.6)
+  const logoBuffer = await sharp(Buffer.from(pixels), { raw: { width: info.width, height: info.height, channels: 4 } }).png().toBuffer()
   const { width, height } = await sharp(slideBuffer).metadata()
   return sharp(slideBuffer)
     .composite([{ input: logoBuffer, left: width - LOGO_SIZE - LOGO_MARGIN, top: height - LOGO_SIZE - LOGO_MARGIN }])
