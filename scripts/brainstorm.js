@@ -330,17 +330,9 @@ Call the generate_worksheet_plan function with the complete plan.`
 
   const MAX_RETRIES = 3
   let plan = null
-  let lastError = null
+  const messages = [{ role: 'user', content: prompt }]
 
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
-    const messages = [{ role: 'user', content: prompt }]
-    if (lastError) {
-      messages.push({
-        role: 'user',
-        content: `RETRY REQUIRED: Your previous plan was rejected — ${lastError}. Fix the issue and call generate_worksheet_plan again with a valid plan.`,
-      })
-    }
-
     const result = await withRetry(() => client.chat.completions.create({
       model: 'gpt-4o',
       max_tokens: 16000,
@@ -349,18 +341,23 @@ Call the generate_worksheet_plan function with the complete plan.`
       messages,
     }))
 
-    const toolCall = result.choices[0].message.tool_calls?.[0]
+    const assistantMsg = result.choices[0].message
+    const toolCall = assistantMsg.tool_calls?.[0]
     if (!toolCall) throw new Error('OpenAI did not return a tool call for generate_worksheet_plan')
 
     const candidate = JSON.parse(toolCall.function.arguments)
 
     try {
       validate(candidate, maxPages, packageType)
-      lastError = null
     } catch (err) {
-      lastError = err.message
       if (attempt <= MAX_RETRIES) {
         console.warn(`brainstorm validation (attempt ${attempt}/${MAX_RETRIES + 1}): ${err.message} — retrying`)
+        messages.push(assistantMsg)
+        messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: `Validation failed: ${err.message}. Fix the issue and call generate_worksheet_plan again with a valid plan.`,
+        })
         continue
       }
       throw err
