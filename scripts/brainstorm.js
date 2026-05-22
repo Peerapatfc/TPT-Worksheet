@@ -118,8 +118,8 @@ const TPT_TAGS = [
 ]
 
 const PAGE_RANGES = {
-  free:  { min: 3,  max: 8  },
-  small: { min: 12, max: 20 },
+  free:  { min: 7,  max: 10 },
+  small: { min: 15, max: 20 },
   large: { min: 21, max: null },
 }
 
@@ -143,8 +143,8 @@ export async function brainstorm(gradeLevel, maxPages, history = [], packageType
 
   const largeMaxNEven = (() => { const n = Math.floor((pageMax - 1) / 1.5); return n % 2 === 0 ? n : n - 1 })()
   const nOptions = {
-    free:  'N = 2 or 4 (total pages: 4 or 7)',
-    small: 'N = 8, 9, 10, 11, or 12 worksheets',
+    free:  'N = 5 or 6 (total pages: 9 or 10)',
+    small: 'N = 10, 11, or 12 worksheets',
     large: `N = 14 to ${largeMaxNEven} worksheets — MINIMUM is 14, fewer will be rejected`,
   }[packageType]
 
