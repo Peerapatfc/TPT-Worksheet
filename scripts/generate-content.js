@@ -159,7 +159,7 @@ Call the validate_content function with your assessment.`
   let result
   try {
     result = await withRetry(() => client.chat.completions.create({
-      model: 'llama-3.1-8b-instant',
+      model: 'llama-3.3-70b-versatile',
       max_tokens: 2048,
       tools: [{
         type: 'function',
