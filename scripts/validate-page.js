@@ -40,18 +40,25 @@ export async function validatePage(page, buffer, plan = {}) {
       if (qaSource.length > 0) {
         const qaList = qaSource.map(q => `${q.num}. Q: ${q.question} → Expected: ${q.answer}`).join('\n')
         const forLabel = nums.length > 0 ? ` (answers for Pages ${nums.join(' & ')})` : ''
-        contentChecks += `\n7. The answer key${forLabel} shows correct answers matching these questions. Flag any missing or incorrect answer:\n${qaList}`
+        contentChecks += `\n7. The answer key${forLabel} shows correct answers matching these questions. Accept semantically equivalent answers — do not fail for minor wording differences. Only flag clearly wrong or missing answers:\n${qaList}`
       } else {
         contentChecks += `\n7. Every answer shown is academically correct — verify math calculations, spelling, grammar, facts, or logic. Flag any incorrect answer.`
       }
     }
   }
 
+  const isCover = page.type === 'cover'
+  const needsWritingSpace = page.type === 'worksheet' || page.type === 'activity'
+  const writingSpaceCheck = needsWritingSpace
+    ? '\n2. Has sufficient writing or answer space for students'
+    : isCover
+      ? '\n2. Is visually appealing as a cover page (no writing space required)'
+      : '\n2. Answers are clearly printed (no student writing space required for answer keys)'
+
   const prompt = `You are a quality checker for Teachers Pay Teachers (TPT) printable worksheets.
 
 Examine this worksheet image and check ALL of the following:
-1. Has a visible header with title, grade level, and page number
-2. Has sufficient writing or answer space for students
+1. Has a visible header with title, grade level, and page number${writingSpaceCheck}
 3. Content matches expected page type: "${page.type}" (cover/worksheet/activity/answer_key)
 4. Layout is clean and professional — readable font, no clutter
 5. If type is "answer_key": answers or solutions are visibly present${contentChecks}
