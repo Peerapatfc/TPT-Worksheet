@@ -4,7 +4,7 @@ import { validatePage } from './validate-page.js'
 import { reconcilePageContent } from './reconcile-content.js'
 
 const client = new OpenAI()
-const MAX_ATTEMPTS = 5
+const MAX_ATTEMPTS = 3
 
 async function withRetry(fn, maxAttempts = 4, baseDelayMs = 2000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -54,7 +54,7 @@ export async function generatePages(plan) {
 
       const validation = await validatePage(page, buffer, plan)
       if (validation.pass) {
-        await reconcilePageContent(page, buffer)
+        if (page.content?.imageSpec) await reconcilePageContent(page, buffer)
         buffer = await sharp(buffer).png({ compressionLevel: 9 }).toBuffer()
         console.log(`Generated page ${page.pageNum}/${plan.pageCount}: ${page.filename} (attempt ${attempt})`)
         break

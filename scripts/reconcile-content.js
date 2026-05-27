@@ -40,8 +40,8 @@ Call the reconcile_answers function. If no visual data is found in the image, se
   let result
   try {
     result = await withRetry(() => client.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 2048,
+      model: 'gpt-4o-mini',
+      max_tokens: 1024,
       tools: [{
         type: 'function',
         function: {

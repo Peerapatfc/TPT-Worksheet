@@ -1,8 +1,6 @@
-import OpenAI from 'openai'
 import { mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
-
-const client = new OpenAI()
+import { groqClient as client } from './groq-client.js'
 
 async function withRetry(fn, maxAttempts = 4, baseDelayMs = 2000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -59,8 +57,8 @@ Call the generate_page_content function with content for all pages.`
   let result
   try {
     result = await withRetry(() => client.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 16000,
+      model: 'llama-3.3-70b-versatile',
+      max_tokens: 8000,
       tools: [{
         type: 'function',
         function: {
@@ -161,8 +159,8 @@ Call the validate_content function with your assessment.`
   let result
   try {
     result = await withRetry(() => client.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 4096,
+      model: 'llama-3.1-8b-instant',
+      max_tokens: 2048,
       tools: [{
         type: 'function',
         function: {
