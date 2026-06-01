@@ -46,7 +46,7 @@ export async function generatePages(plan) {
         model: 'gpt-image-2',
         prompt,
         size: page.type === 'cover' ? '1024x1024' : '1024x1536',
-        quality: 'medium',
+        quality: page.type === 'cover' ? 'high' : page.type === 'answer_key' ? 'low' : 'medium',
       }))
 
       if (!response.data?.[0]?.b64_json) throw new Error(`OpenAI image API returned no data for page ${page.pageNum}`)
