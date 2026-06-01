@@ -69,7 +69,7 @@ Call the check_worksheet_quality function with your assessment. If all checks pa
   try {
     result = await withRetry(() => client.chat.completions.create({
       model: 'gpt-4o-mini',
-      max_tokens: 512,
+      max_tokens: 256,
       tools: [{
         type: 'function',
         function: {

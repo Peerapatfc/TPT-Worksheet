@@ -41,12 +41,12 @@ async function compositeLogo(slideBuffer) {
     .toBuffer()
 }
 
-async function generateSlide(prompt) {
+async function generateSlide(prompt, quality = 'medium') {
   const response = await withRetry(() => client.images.generate({
     model: 'gpt-image-2',
     prompt,
     size: '1024x1024',
-    quality: 'medium',
+    quality,
   }))
   if (!response.data?.[0]?.b64_json) throw new Error('OpenAI image API returned no data')
   return Buffer.from(response.data[0].b64_json, 'base64')
@@ -83,9 +83,9 @@ Professional clean layout. Accent color ${color}. No illustrations, focus on tex
 
   console.log('Generating marketing slides...')
   const [coverRaw, whatsIncludedRaw, benefitsRaw] = await Promise.all([
-    generateSlide(coverPrompt),
-    generateSlide(whatsIncludedPrompt),
-    generateSlide(benefitsPrompt),
+    generateSlide(coverPrompt, 'medium'),
+    generateSlide(whatsIncludedPrompt, 'low'),
+    generateSlide(benefitsPrompt, 'low'),
   ])
 
   const [cover, whatsIncluded, benefits] = await Promise.all([

@@ -334,8 +334,8 @@ Call the generate_worksheet_plan function with the complete plan.`
 
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
     const result = await withRetry(() => client.chat.completions.create({
-      model: 'gpt-4o',
-      max_tokens: 8000,
+      model: 'gpt-4o-mini',
+      max_tokens: 4000,
       tools: TOOL_DEF,
       tool_choice: { type: 'function', function: { name: 'generate_worksheet_plan' } },
       messages,
