@@ -4,7 +4,7 @@ import { generateContent } from './generate-content.js'
 import { generatePages } from './generate-pages.js'
 import { generateMarketingSlides } from './generate-marketing-slides.js'
 import { convertPdfs } from './convert-pdf.js'
-import { uploadDrive } from './upload-drive.js'
+import { uploadDrive, checkGoogleToken } from './upload-drive.js'
 import { notifyTelegram } from './notify-telegram.js'
 import { readTopicHistory, saveTopicEntry } from './topic-history.js'
 import { appendLog } from './logger.js'
@@ -25,6 +25,9 @@ async function main() {
   const start = Date.now()
   const packageType = getPackageType()
   appendLog({ step: 'start', status: 'ok', timestamp: new Date().toISOString(), packageType })
+
+  await checkGoogleToken()
+  appendLog({ step: 'check_google_token', status: 'ok' })
 
   const history = await readTopicHistory()
   appendLog({ step: 'load_history', status: 'ok', count: history.length })

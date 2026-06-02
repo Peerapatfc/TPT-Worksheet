@@ -2,13 +2,32 @@ import { google } from 'googleapis'
 import { createHash, randomUUID } from 'crypto'
 import { Readable } from 'stream'
 
-function getDrive() {
+function getAuth() {
   const auth = new google.auth.OAuth2(
     process.env.GOOGLE_OAUTH_CLIENT_ID,
     process.env.GOOGLE_OAUTH_CLIENT_SECRET,
   )
   auth.setCredentials({ refresh_token: process.env.GOOGLE_OAUTH_REFRESH_TOKEN })
-  return google.drive({ version: 'v3', auth })
+  return auth
+}
+
+function getDrive() {
+  return google.drive({ version: 'v3', auth: getAuth() })
+}
+
+export async function checkGoogleToken() {
+  const auth = getAuth()
+  try {
+    await auth.getAccessToken()
+    console.log('Google OAuth token: valid')
+  } catch (err) {
+    const isRevoked = err.message?.includes('invalid_grant') || err.response?.data?.error === 'invalid_grant'
+    throw new Error(
+      isRevoked
+        ? 'Google OAuth refresh token expired or revoked. Re-run get-refresh-token.js and update GOOGLE_OAUTH_REFRESH_TOKEN secret.'
+        : `Google OAuth token check failed: ${err.message}`
+    )
+  }
 }
 
 function slugify(text) {
