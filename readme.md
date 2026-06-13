@@ -1,23 +1,26 @@
 # TPT Worksheet Generator
 
-Daily pipeline: generates one printable worksheet SET per day using gpt-4o + gpt-image-2, uploads to Google Drive, notifies Telegram. Runs via GitHub Actions cron.
+Daily pipeline: generates one printable worksheet SET per day (OpenAI gpt-4o + gpt-image-2, Groq Llama for Q&A), uploads to Google Drive, notifies Telegram. Runs via GitHub Actions cron.
 
 ## How It Works
 
 ```
 GitHub Actions cron (00:00 UTC)
-  → scripts/pipeline.js
-    → topic-history.js       (Supabase: load past 60 topics to avoid repeats)
-    → brainstorm.js          (gpt-4o: pick topic + plan N pages + education standards)
-    → generate-content.js    (gpt-4o: generate Q&A content for each worksheet page)
-    → generate-pages.js      (gpt-image-2: generate page images)
-    → validate-page.js       (gpt-4o vision: QA check, retry up to 2× on fail)
-    → reconcile-content.js   (gpt-4o vision: correct Q&A answers against image)
-    → convert-pdf.js         (pdf-lib: PNG → grayscale PDF + preview PDF per page)
-    → upload-drive.js        (Google Drive OAuth2: folder + all files)
-    → topic-history.js       (Supabase: save topic to history)
-    → notify-telegram.js     (Telegram: cover photo + caption)
+  → scripts/pipeline.js → src/run-pipeline.js
+    → topic-history          (Supabase: load past 60 topics to avoid repeats)
+    → brainstorm             (gpt-4o: pick topic + plan N pages + education standards)
+    → generate-content       (Groq llama-3.3-70b: generate + recheck Q&A per page)
+    → generate-pages         (gpt-image-2: generate page images, bounded concurrency)
+      → validate-page        (gpt-4o-mini vision: QA check, retry up to 2× on fail)
+      → reconcile-content    (gpt-4o-mini vision: correct Q&A answers against image)
+    → generate-marketing-slides (gpt-image-2 ×3, non-essential — degrades gracefully)
+    → convert-pdf            (pdf-lib: PNG → grayscale PDF + combined + preview PDF)
+    → upload-drive           (Google Drive OAuth2: folder + all files)
+    → topic-history          (Supabase: save topic to history)
+    → notify-telegram        (Telegram: cover photo + MarkdownV2 caption)
 ```
+
+Library code lives under `src/` (`config/`, `llm/`, `lib/`, `steps/`); `scripts/` holds only entry points. See [CLAUDE.md](CLAUDE.md) for the full layout.
 
 Each run produces one set folder in Google Drive:
 ```
@@ -40,9 +43,9 @@ Day-of-week routing controls package size:
 
 | Tier | Pages | Price | Trigger |
 |------|-------|-------|---------|
-| `free` | 3–8 | $0 | `FREE_WORKSHEET_DAY` |
-| `small` | 10–20 | $2–5 | all other days |
-| `large` | 20–`MAX_PAGES_PER_SET` | $5–15 | `LARGE_PACKAGE_DAY` |
+| `free` | 7–10 | $0 | `FREE_WORKSHEET_DAY` |
+| `small` | 15–20 | $2–5 | all other days |
+| `large` | 21–`MAX_PAGES_PER_SET` | $5–15 | `LARGE_PACKAGE_DAY` |
 
 ## TPT Listing — Static Fields
 
@@ -100,6 +103,7 @@ create table topic_history (
 | Secret | How to get |
 |--------|-----------|
 | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
+| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) — used for Q&A content generation |
 | `GOOGLE_DRIVE_FOLDER_ID` | Open assets Drive folder → copy ID from URL |
 | `GOOGLE_DRIVE_TPT_FOLDER_ID` | Open TPT-only Drive folder → copy ID from URL |
 | `GOOGLE_OAUTH_CLIENT_ID` | Google Cloud Console → Credentials |
@@ -118,6 +122,7 @@ create table topic_history (
 | `MAX_PAGES_PER_SET` | `30` | Max pages for large package |
 | `FREE_WORKSHEET_DAY` | `0` | Day of week for free tier (0=Sun … 6=Sat) |
 | `LARGE_PACKAGE_DAY` | _(unset)_ | Day of week for large tier. Omit = never |
+| `PAGE_CONCURRENCY` | `1` | Pages generated in parallel. 2–3 is faster; higher risks image rate limits |
 
 ### 5. Telegram Setup
 
@@ -134,9 +139,17 @@ Or locally:
 ```bash
 cp .env.example .env   # fill in all values
 npm install
+npm test               # unit tests (pure logic, no API keys needed)
 npm run test:plan      # dry-run: brainstorm + content only (no images/Drive/Telegram)
 npm start              # full pipeline run
 ```
+
+## Tests
+
+`npm test` runs the [vitest](https://vitest.dev) suite under `test/` against the pure-logic
+surface (tier routing, plan validation, slugify, MarkdownV2 caption, prompt building,
+answer-key resolution, bounded concurrency). No API keys or network required — it also runs
+in CI on every push/PR (`.github/workflows/test.yml`) and as a gate before the daily pipeline.
 
 ## Logs
 

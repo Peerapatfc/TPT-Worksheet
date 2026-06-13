@@ -1,6 +1,7 @@
 import { google } from 'googleapis'
 import { createHash, randomUUID } from 'crypto'
 import { Readable } from 'stream'
+import { slugify } from '../lib/slugify.js'
 
 function getAuth() {
   const auth = new google.auth.OAuth2(
@@ -30,13 +31,8 @@ export async function checkGoogleToken() {
   }
 }
 
-function slugify(text) {
-  return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50)
-}
-
 async function createFolder(drive, name, parentId) {
   const res = await drive.files.create({
-
     requestBody: {
       name,
       mimeType: 'application/vnd.google-apps.folder',
@@ -49,7 +45,6 @@ async function createFolder(drive, name, parentId) {
 
 async function uploadBuffer(drive, buffer, filename, mimeType, folderId) {
   const res = await drive.files.create({
-
     requestBody: {
       name: filename,
       parents: [folderId],
@@ -66,7 +61,7 @@ async function uploadBuffer(drive, buffer, filename, mimeType, folderId) {
 export async function uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer, runDate, marketingSlides = []) {
   const drive = getDrive()
   const parentId = process.env.GOOGLE_DRIVE_FOLDER_ID
-  const setSlug = `${slugify(plan.setTitle)}-${randomUUID().slice(0, 8)}`
+  const setSlug = `${slugify(plan.setTitle, 50)}-${randomUUID().slice(0, 8)}`
   const folderName = `${runDate}_${setSlug}`
 
   const folder = await createFolder(drive, folderName, parentId)
@@ -151,7 +146,7 @@ export async function uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedP
 
   await uploadBuffer(drive, Buffer.from(tptText), 'tpt-listing.txt', 'text/plain', folderId)
 
-  const slug = slugify(plan.setTitle)
+  const slug = slugify(plan.setTitle, 50)
   const combinedFilename = `${slug}-complete-set.pdf`
   const colorCombinedFilename = `${slug}-complete-set-color.pdf`
   const previewFilename = `${slug}-preview.pdf`

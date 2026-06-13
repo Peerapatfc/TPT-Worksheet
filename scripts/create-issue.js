@@ -11,9 +11,10 @@ const body = `## Worksheet Pipeline Failed
 
 ### Next Steps
 - [ ] Check Actions log for error details
-- [ ] Verify \`ANTHROPIC_API_KEY\` is valid
 - [ ] Verify \`OPENAI_API_KEY\` is valid
-- [ ] Verify \`GOOGLE_SERVICE_ACCOUNT_KEY\` is valid JSON
+- [ ] Verify \`GROQ_API_KEY\` is valid
+- [ ] Verify \`GOOGLE_OAUTH_REFRESH_TOKEN\` is not expired/revoked (re-run get-refresh-token.js)
+- [ ] Verify \`SUPABASE_URL\` / \`SUPABASE_SERVICE_ROLE_KEY\`
 - [ ] Verify \`TELEGRAM_BOT_TOKEN\` / \`TELEGRAM_CHANNEL_ID\`
 - [ ] Re-run via workflow_dispatch once fixed
 

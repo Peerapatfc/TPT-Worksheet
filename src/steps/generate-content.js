@@ -1,19 +1,74 @@
 import { mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { groqClient as client } from './groq-client.js'
+import { groq } from '../llm/clients.js'
+import { callTool } from '../llm/tool-call.js'
+import { MODELS } from '../config/constants.js'
+import { slugify } from '../lib/slugify.js'
 
-async function withRetry(fn, maxAttempts = 4, baseDelayMs = 2000) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn()
-    } catch (err) {
-      const retryable = err.status === 429 || err.status === 503 || err.status === 500
-      if (!retryable || attempt === maxAttempts) throw err
-      const delay = baseDelayMs * 2 ** (attempt - 1)
-      console.warn(`OpenAI ${err.status} on attempt ${attempt}/${maxAttempts} — retrying in ${delay}ms`)
-      await new Promise(r => setTimeout(r, delay))
-    }
-  }
+const contentTool = {
+  type: 'function',
+  function: {
+    name: 'generate_page_content',
+    description: 'Generate questions and image specifications for worksheet pages',
+    parameters: {
+      type: 'object',
+      properties: {
+        pages: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              pageNum: { type: 'integer' },
+              title: { type: 'string' },
+              imageSpec: { type: 'string', description: 'Exact visual data spec, or empty string if no visualization' },
+              questions: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    num: { type: 'integer' },
+                    question: { type: 'string' },
+                    answer: { type: 'string' },
+                  },
+                  required: ['num', 'question', 'answer'],
+                },
+              },
+            },
+            required: ['pageNum', 'title', 'imageSpec', 'questions'],
+          },
+        },
+      },
+      required: ['pages'],
+    },
+  },
+}
+
+const validateTool = {
+  type: 'function',
+  function: {
+    name: 'validate_content',
+    description: 'Validate and correct worksheet Q&A for academic accuracy',
+    parameters: {
+      type: 'object',
+      properties: {
+        pass: { type: 'boolean' },
+        corrections: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              pageNum: { type: 'integer' },
+              questionNum: { type: 'integer' },
+              correctedAnswer: { type: 'string' },
+              reason: { type: 'string' },
+            },
+            required: ['pageNum', 'questionNum', 'correctedAnswer', 'reason'],
+          },
+        },
+      },
+      required: ['pass', 'corrections'],
+    },
+  },
 }
 
 async function fetchContent(plan, contentPages) {
@@ -54,66 +109,32 @@ ${pageDescriptions}
 
 Call the generate_page_content function with content for all pages.`
 
-  let result
+  let res
   try {
-    result = await withRetry(() => client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      max_tokens: 8000,
-      tools: [{
-        type: 'function',
-        function: {
-          name: 'generate_page_content',
-          description: 'Generate questions and image specifications for worksheet pages',
-          parameters: {
-            type: 'object',
-            properties: {
-              pages: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    pageNum: { type: 'integer' },
-                    title: { type: 'string' },
-                    imageSpec: { type: 'string', description: 'Exact visual data spec, or empty string if no visualization' },
-                    questions: {
-                      type: 'array',
-                      items: {
-                        type: 'object',
-                        properties: {
-                          num: { type: 'integer' },
-                          question: { type: 'string' },
-                          answer: { type: 'string' },
-                        },
-                        required: ['num', 'question', 'answer'],
-                      },
-                    },
-                  },
-                  required: ['pageNum', 'title', 'imageSpec', 'questions'],
-                },
-              },
-            },
-            required: ['pages'],
-          },
-        },
-      }],
-      tool_choice: { type: 'function', function: { name: 'generate_page_content' } },
+    res = await callTool(groq(), {
+      model: MODELS.content,
+      maxTokens: 8000,
+      tool: contentTool,
       messages: [{ role: 'user', content: prompt }],
-    }))
+      label: 'Groq content',
+    })
   } catch (err) {
     console.warn(`generateContent fetch failed (${err.status ?? err.message})`)
     return null
   }
 
-  const toolCall = result.choices[0].message.tool_calls?.[0]
-  if (!toolCall) {
+  if (!res.args) {
     console.warn('generateContent: no tool call returned')
     return null
   }
-
-  return JSON.parse(toolCall.function.arguments)
+  return res.args
 }
 
-function validateSchema(contentData, contentPages, packageType = 'small') {
+/**
+ * Schema-level checks on generated content. Returns an array of issue strings
+ * (empty = valid). Exported for unit testing.
+ */
+export function validateSchema(contentData, contentPages, packageType = 'small') {
   const minQ = packageType === 'large' ? 5 : 4
   const issues = []
   const contentMap = new Map(contentData.pages.map(p => [p.pageNum, p]))
@@ -156,50 +177,22 @@ ${JSON.stringify(contentData.pages, null, 2)}
 
 Call the validate_content function with your assessment.`
 
-  let result
+  let res
   try {
-    result = await withRetry(() => client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      max_tokens: 2048,
-      tools: [{
-        type: 'function',
-        function: {
-          name: 'validate_content',
-          description: 'Validate and correct worksheet Q&A for academic accuracy',
-          parameters: {
-            type: 'object',
-            properties: {
-              pass: { type: 'boolean' },
-              corrections: {
-                type: 'array',
-                items: {
-                  type: 'object',
-                  properties: {
-                    pageNum: { type: 'integer' },
-                    questionNum: { type: 'integer' },
-                    correctedAnswer: { type: 'string' },
-                    reason: { type: 'string' },
-                  },
-                  required: ['pageNum', 'questionNum', 'correctedAnswer', 'reason'],
-                },
-              },
-            },
-            required: ['pass', 'corrections'],
-          },
-        },
-      }],
-      tool_choice: { type: 'function', function: { name: 'validate_content' } },
+    res = await callTool(groq(), {
+      model: MODELS.content,
+      maxTokens: 2048,
+      tool: validateTool,
       messages: [{ role: 'user', content: prompt }],
-    }))
+      label: 'Groq validate',
+    })
   } catch (err) {
     console.warn(`validateAndCorrect failed (${err.status ?? err.message}) — using content as-is`)
     return contentData
   }
 
-  const toolCall = result.choices[0].message.tool_calls?.[0]
-  if (!toolCall) return contentData
-
-  const validation = JSON.parse(toolCall.function.arguments)
+  if (!res.args) return contentData
+  const validation = res.args
 
   if (validation.pass || !validation.corrections?.length) return contentData
 
@@ -246,7 +239,7 @@ export async function generateContent(plan) {
     break
   }
 
-  const slug = plan.setTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+  const slug = slugify(plan.setTitle)
   const date = new Date().toISOString().split('T')[0]
   try {
     mkdirSync(join('logs'), { recursive: true })

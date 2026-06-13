@@ -1,37 +1,32 @@
 import { PDFDocument, rgb, degrees } from 'pdf-lib'
 import sharp from 'sharp'
+import { A4 } from '../config/constants.js'
 
-const A4_WIDTH = 595.28
-const A4_HEIGHT = 841.89
-
-async function bufferToPdfPage(pdfDoc, imgBuffer) {
+/** Embed a PNG buffer centered and aspect-fit onto a new A4 page. */
+async function embedToPage(pdfDoc, imgBuffer) {
   const pngImage = await pdfDoc.embedPng(imgBuffer)
   const { width: imgW, height: imgH } = pngImage
-  const scale = Math.min(A4_WIDTH / imgW, A4_HEIGHT / imgH)
-  const pdfPage = pdfDoc.addPage([A4_WIDTH, A4_HEIGHT])
+  const scale = Math.min(A4.width / imgW, A4.height / imgH)
+  const pdfPage = pdfDoc.addPage([A4.width, A4.height])
   pdfPage.drawImage(pngImage, {
-    x: (A4_WIDTH - imgW * scale) / 2,
-    y: (A4_HEIGHT - imgH * scale) / 2,
+    x: (A4.width - imgW * scale) / 2,
+    y: (A4.height - imgH * scale) / 2,
     width: imgW * scale,
     height: imgH * scale,
   })
 }
 
-async function pageToPdf(page) {
+const toGrayscale = (buffer) => sharp(buffer).grayscale().png().toBuffer()
+
+async function singlePagePdf(imgBuffer) {
   const pdfDoc = await PDFDocument.create()
-  const grayscaleBuffer = await sharp(page.buffer).grayscale().png().toBuffer()
-  await bufferToPdfPage(pdfDoc, grayscaleBuffer)
-  return { page, pdfBuffer: Buffer.from(await pdfDoc.save()) }
+  await embedToPage(pdfDoc, imgBuffer)
+  return Buffer.from(await pdfDoc.save())
 }
 
-async function buildCombinedPdf(pages, grayscale) {
+async function buildCombinedPdf(buffers) {
   const pdfDoc = await PDFDocument.create()
-  for (const page of pages) {
-    const imgBuffer = grayscale
-      ? await sharp(page.buffer).grayscale().png().toBuffer()
-      : page.buffer
-    await bufferToPdfPage(pdfDoc, imgBuffer)
-  }
+  for (const buf of buffers) await embedToPage(pdfDoc, buf)
   return Buffer.from(await pdfDoc.save())
 }
 
@@ -46,7 +41,7 @@ async function buildPreviewPdf(pages) {
   const font = await pdfDoc.embedFont('Helvetica-Bold')
 
   for (const page of previewPages) {
-    await bufferToPdfPage(pdfDoc, page.buffer)
+    await embedToPage(pdfDoc, page.buffer)
     const pdfPage = pdfDoc.getPages().at(-1)
     const { width, height } = pdfPage.getSize()
     pdfPage.drawText('PREVIEW', {
@@ -63,13 +58,25 @@ async function buildPreviewPdf(pages) {
   return Buffer.from(await pdfDoc.save())
 }
 
+/**
+ * Convert generated page images into the full set of PDFs:
+ *   - one grayscale PDF per page (printable)
+ *   - a combined grayscale PDF (TPT upload)
+ *   - a combined color PDF
+ *   - a watermarked color preview PDF
+ *
+ * Grayscale conversion is computed once per page and reused across the per-page
+ * and combined grayscale PDFs.
+ */
 export async function convertPdfs(pages) {
-  const results = await Promise.all(pages.map(pageToPdf))
-  const pagesWithPdf = results.map(r => ({ ...r.page, pdfBuffer: r.pdfBuffer }))
+  const grayBuffers = await Promise.all(pages.map(p => toGrayscale(p.buffer)))
+
+  const perPagePdfs = await Promise.all(grayBuffers.map(singlePagePdf))
+  const pagesWithPdf = pages.map((page, i) => ({ ...page, pdfBuffer: perPagePdfs[i] }))
 
   const [combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer] = await Promise.all([
-    buildCombinedPdf(pages, true),
-    buildCombinedPdf(pages, false),
+    buildCombinedPdf(grayBuffers),
+    buildCombinedPdf(pages.map(p => p.buffer)),
     buildPreviewPdf(pages),
   ])
 

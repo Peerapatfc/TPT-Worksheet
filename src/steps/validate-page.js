@@ -1,21 +1,29 @@
-import OpenAI from 'openai'
+import { openai } from '../llm/clients.js'
+import { callTool } from '../llm/tool-call.js'
+import { MODELS } from '../config/constants.js'
+import { resolveSourceQuestions } from '../lib/source-pages.js'
 
-const client = new OpenAI()
-
-async function withRetry(fn, maxAttempts = 4, baseDelayMs = 2000) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn()
-    } catch (err) {
-      const retryable = err.status === 429 || err.status === 503 || err.status === 500
-      if (!retryable || attempt === maxAttempts) throw err
-      const delay = baseDelayMs * 2 ** (attempt - 1)
-      console.warn(`OpenAI ${err.status} on attempt ${attempt}/${maxAttempts} — retrying in ${delay}ms`)
-      await new Promise(r => setTimeout(r, delay))
-    }
-  }
+const qualityTool = {
+  type: 'function',
+  function: {
+    name: 'check_worksheet_quality',
+    description: 'Report quality check results for a worksheet image',
+    parameters: {
+      type: 'object',
+      properties: {
+        pass: { type: 'boolean' },
+        issues: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['pass', 'issues'],
+    },
+  },
 }
 
+/**
+ * Vision QA on a generated page image. Returns { pass, issues }.
+ * On any API/parse failure it returns pass:true (fail-open) so a flaky validator
+ * never blocks the pipeline — the issue string records why it was skipped.
+ */
 export async function validatePage(page, buffer, plan = {}) {
   const gradeLevel = plan.gradeLevel ?? 'unknown grade'
   const subject = plan.subject ?? 'general'
@@ -32,11 +40,7 @@ export async function validatePage(page, buffer, plan = {}) {
     }
 
     if (isAnswerKey) {
-      const nums = page.sourcePageNums ?? (page.sourcePageNum ? [page.sourcePageNum] : [])
-      const sourcePages = nums.map(n => (plan.pages ?? []).find(p => p.pageNum === n)).filter(Boolean)
-      const qaSource = sourcePages.length > 0
-        ? sourcePages.flatMap(p => p.content?.questions ?? [])
-        : (plan.pages ?? []).filter(p => p.content?.questions?.length > 0).flatMap(p => p.content.questions)
+      const { nums, questions: qaSource } = resolveSourceQuestions(page, plan.pages ?? [])
       if (qaSource.length > 0) {
         const qaList = qaSource.map(q => `${q.num}. Q: ${q.question} → Expected: ${q.answer}`).join('\n')
         const forLabel = nums.length > 0 ? ` (answers for Pages ${nums.join(' & ')})` : ''
@@ -65,45 +69,26 @@ Examine this worksheet image and check ALL of the following:
 
 Call the check_worksheet_quality function with your assessment. If all checks pass, return pass: true with an empty issues array.`
 
-  let result
+  let res
   try {
-    result = await withRetry(() => client.chat.completions.create({
-      model: 'gpt-4o-mini',
-      max_tokens: 256,
-      tools: [{
-        type: 'function',
-        function: {
-          name: 'check_worksheet_quality',
-          description: 'Report quality check results for a worksheet image',
-          parameters: {
-            type: 'object',
-            properties: {
-              pass: { type: 'boolean' },
-              issues: { type: 'array', items: { type: 'string' } },
-            },
-            required: ['pass', 'issues'],
-          },
-        },
-      }],
-      tool_choice: { type: 'function', function: { name: 'check_worksheet_quality' } },
+    res = await callTool(openai(), {
+      model: MODELS.validate,
+      maxTokens: 256,
+      tool: qualityTool,
+      label: 'OpenAI validate',
       messages: [{
         role: 'user',
         content: [
-          {
-            type: 'image_url',
-            image_url: { url: `data:image/png;base64,${buffer.toString('base64')}` },
-          },
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${buffer.toString('base64')}` } },
           { type: 'text', text: prompt },
         ],
       }],
-    }))
+    })
   } catch (err) {
     console.warn(`validatePage failed after retries (${err.status ?? err.message}) — skipping`)
     return { pass: true, issues: [`validation skipped: ${err.status ?? err.message}`] }
   }
 
-  const toolCall = result.choices[0].message.tool_calls?.[0]
-  if (!toolCall) return { pass: true, issues: ['validation parse error — skipping'] }
-
-  return JSON.parse(toolCall.function.arguments)
+  if (!res.args) return { pass: true, issues: ['validation parse error — skipping'] }
+  return res.args
 }
