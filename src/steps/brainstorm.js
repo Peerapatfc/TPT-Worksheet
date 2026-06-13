@@ -1,128 +1,24 @@
-import OpenAI from 'openai'
+import { openai } from '../llm/clients.js'
+import { withRetry } from '../llm/with-retry.js'
+import { MODELS, PAGE_RANGES } from '../config/constants.js'
+import { TPT_SUBJECT_AREAS, TPT_TAGS } from '../config/tpt-taxonomy.js'
+import { worksheetPlanTool } from './schema/worksheet-plan.js'
 
-const client = new OpenAI()
-
-async function withRetry(fn, maxAttempts = 4, baseDelayMs = 2000) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn()
-    } catch (err) {
-      const retryable = err.status === 429 || err.status === 503 || err.status === 500
-      if (!retryable || attempt === maxAttempts) throw err
-      const delay = baseDelayMs * 2 ** (attempt - 1)
-      console.warn(`OpenAI ${err.status} on attempt ${attempt}/${maxAttempts} — retrying in ${delay}ms`)
-      await new Promise(r => setTimeout(r, delay))
-    }
-  }
+/**
+ * Largest even worksheet count N that keeps total pages (1 + N + ceil(N/2))
+ * within `pageMax`. Extracted for unit testing.
+ * @param {number} pageMax
+ * @returns {number}
+ */
+export function largestEvenN(pageMax) {
+  const n = Math.floor((pageMax - 1) / 1.5)
+  return n % 2 === 0 ? n : n - 1
 }
 
-const TPT_SUBJECT_AREAS = [
-  // Art
-  'Art', 'Art History', 'Coloring Pages', 'Graphic Arts', 'Visual Arts', 'Other (Arts)',
-  // English Language Arts
-  'English Language Arts', 'Alphabet', 'Balanced Literacy', 'Close Reading', 'Creative Writing', 'ELA Test Prep',
-  'Grammar', 'Handwriting', 'Informational Text', 'Library Skills', 'Literature',
-  'Novel Studies', 'Phonics & Phonological Awareness', 'Poetry', 'Reading',
-  'Reading Strategies', 'Science of Reading', 'Short Stories', 'Sight Words',
-  'Spelling', 'Vocabulary', 'Writing', 'Writing-Essays', 'Writing-Expository', 'Other (ELA)',
-  // Health
-  'Health',
-  // Math
-  'Math', 'Algebra', 'Algebra 2', 'Applied Math', 'Arithmetic', 'Basic Operations', 'Calculus',
-  'Decimals', 'Financial Literacy', 'Fractions', 'Geometry', 'Graphing', 'Math Test Prep',
-  'Measurement', 'Mental Math', 'Money Math', 'Numbers', 'Order of Operations',
-  'Place Value', 'PreCalculus', 'Statistics', 'Telling Time', 'Other (Math)',
-  // Performing Arts
-  'Performing Arts', 'Dance', 'Drama', 'Instrumental Music', 'Music', 'Music Composition', 'Vocal Music',
-  'Other (Performing Arts)',
-  // Physical Education
-  'Physical Education',
-  // Science
-  'Science', 'Anatomy', 'Archaeology', 'Astronomy', 'Basic Principles', 'Biology', 'Chemistry',
-  'Computer Science - Technology', 'Earth Sciences', 'Engineering', 'Environment',
-  'Family Consumer Sciences', 'Forensics', 'General Science', 'Instructional Technology',
-  'Marine Science', 'Physical Science', 'Physics', 'Robotics', 'Other (Science)',
-  // Social Emotional
-  'Social Emotional', 'Character Education', 'Classroom Community', 'School Counseling', 'School Psychology',
-  'Social Emotional Learning',
-  // Social Studies
-  'Social Studies', 'AAPI History', 'African History', 'Ancient History', 'Asian Studies', 'Australian History',
-  'Black History', 'British History', 'Business', 'Canadian History', 'Civics',
-  'Criminal Justice - Law', 'Economics', 'Elections - Voting', 'European History',
-  'Geography', 'Government', 'Latino and Hispanic Studies', 'Middle Ages', 'Native Americans',
-  'Psychology', 'Religion', 'U.S. History', 'World History', 'Other (Social Studies)',
-  // Speaking & Listening
-  'Speaking & Listening',
-  // World Languages
-  'World Languages', 'American Sign Language', 'Arabic', 'Chinese', 'French', 'Gaeilge', 'German', 'Hebrew',
-  'Italian', 'Japanese', 'Latin', 'Portuguese', 'Russian', 'Spanish', 'Other (World Language)',
-  // Cross-subject
-  'For All Subjects', 'Not Subject Specific',
-]
-
-const TPT_TAGS = [
-  // Audience
-  'Homeschool', 'Parents', 'Staff & Administrators', 'TPT Sellers',
-  // Language
-  'En español', 'En français', 'English (UK)',
-  // Programs & Methods
-  'Advanced Placement (AP)', 'Early Intervention', 'GATE / Gifted and Talented',
-  'International Baccalaureate (IB)', 'Montessori',
-  // Resource Type — Classroom Decor
-  'Bulletin Board Ideas', 'Posters', 'Word Walls',
-  // Resource Type — Clip Art
-  'Clip Art',
-  // Resource Type — Forms
-  'Classroom Forms', 'Elective Course Proposals', 'Grant Proposals',
-  'Professional Documents', 'School Nurse Documents', 'Student Council',
-  // Resource Type — Hands-on Activities
-  'Activities', 'Bell Ringers', 'Centers', 'Cultural Activities', 'DBQs',
-  'Escape Rooms', 'Games', 'Internet Activities', 'Laboratory', 'Literature Circles',
-  'Project-based Learning', 'Projects', 'Research', 'Scripts', 'Simulations',
-  'Songs', 'Webquests',
-  // Resource Type — Instruction
-  'Bibliographies', 'Guided Reading Books', 'Handouts', 'Interactive Notebooks',
-  'Scaffolded Notes', 'Printables',
-  // Resource Type — Student Assessment
-  'Assessment', 'Critical Thinking and Problem Solving', 'Study Guides',
-  'Study Skills', 'Test Preparation',
-  // Resource Type — Student Practice
-  'Flash Cards', 'Graphic Organizers', 'Homework', 'Independent Work Packet',
-  'Movie Guides', 'Task Cards', 'Workbooks', 'Worksheets',
-  // Resource Type — Teacher Tools
-  'Awards and Certificates', 'Classroom Management', 'Homeschool Curricula',
-  'Leadership Lessons', 'Lectures', 'Lessons', 'Outlines',
-  'Reflective Journals for Teachers', 'Rubrics', 'Syllabi', 'Teacher Manuals',
-  'Teacher Planners', 'Thematic Unit Plans', 'Tools for Common Core',
-  'Tools for Sellers', 'Unit Plans', 'Yearlong Curriculum',
-  // Supports
-  'ESL, EFL, and ELL',
-  'Applied Behavior Analysis', 'Data', 'Life Skills', 'Neurodiversity',
-  'Screenings and Assessments', 'Social Skills', 'Visual Supports', 'Other (Special education)',
-  'Career and Technical Education', 'Child Care', 'Coaching', 'Cooking', 'Leadership',
-  'Occupational Therapy', 'Physical Therapy', 'Professional Development',
-  'Service Learning', 'Vocational Education', 'Other (Specialty)',
-  'AAC', 'Fluency and Stuttering', 'Language', 'Speech Articulation', 'Voice',
-  'Other (Speech therapy)',
-  // Theme — Holiday
-  "AAPI History Month", "April Fools' Day", 'Arbor Day', 'Black History Month',
-  'Christmas-Chanukah-Kwanzaa', 'Cinco de Mayo', 'Day of the Dead / Dia de los Muertos',
-  'Diwali', 'Earth Day', 'Easter', "Father's Day", 'Groundhog Day', 'Halloween',
-  'Hispanic Heritage Month', 'July 4/Independence Day', 'Juneteenth', 'Labor Day',
-  'Lunar New Year', 'Mardi Gras', 'Martin Luther King Day', 'Memorial Day',
-  "Mother's Day", 'New Year', 'Passover', "Presidents' Day", 'Ramadan',
-  "St. Patrick's Day", 'Thanksgiving', "Valentine's Day", 'Veterans Day',
-  "Women's History Month",
-  // Theme — Seasonal
-  'Autumn', 'Back to School', 'End of Year', 'Spring', 'Summer', 'Winter',
-]
-
-const PAGE_RANGES = {
-  free:  { min: 7,  max: 10 },
-  small: { min: 15, max: 20 },
-  large: { min: 21, max: null },
-}
-
+/**
+ * Pick a topic and plan a full worksheet set in a single forced tool call.
+ * Retries up to MAX_RETRIES times, feeding validation errors back to the model.
+ */
 export async function brainstorm(gradeLevel, maxPages, history = [], packageType = 'small', currentMonth = '') {
   const historyBlock =
     history.length > 0
@@ -141,7 +37,7 @@ export async function brainstorm(gradeLevel, maxPages, history = [], packageType
   const range = PAGE_RANGES[packageType]
   const pageMax = packageType === 'large' ? maxPages : range.max
 
-  const largeMaxNEven = (() => { const n = Math.floor((pageMax - 1) / 1.5); return n % 2 === 0 ? n : n - 1 })()
+  const largeMaxNEven = largestEvenN(pageMax)
   const nOptions = {
     free:  'N = 5 or 6 (total pages: 9 or 10)',
     small: 'N = 10, 11, or 12 worksheets',
@@ -249,97 +145,19 @@ Rules for tptListing fields:
 
 Call the generate_worksheet_plan function with the complete plan.`
 
-  const TOOL_DEF = [{
-    type: 'function',
-    function: {
-      name: 'generate_worksheet_plan',
-      description: 'Generate a complete TPT worksheet plan with pages, content, and listing metadata',
-      parameters: {
-        type: 'object',
-        properties: {
-          setTitle: { type: 'string' },
-          subject: { type: 'string' },
-          gradeLevel: { type: 'string' },
-          themeColor: { type: 'string', description: 'Hex color code for border and header bar on all pages, e.g. "#1B4F8A". Must be dark and saturated.', pattern: '^#[0-9A-Fa-f]{6}$' },
-          pageCount: { type: 'integer' },
-          pages: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                pageNum: { type: 'integer' },
-                type: { type: 'string', enum: ['cover', 'worksheet', 'activity', 'answer_key'] },
-                sourcePageNums: { type: 'array', items: { type: 'integer' }, description: 'answer_key pages only: exactly 2 pageNums of the worksheets this page answers' },
-                filename: { type: 'string' },
-                imagePrompt: { type: 'string' },
-                content: {
-                  description: 'null for cover/answer_key pages. For worksheet/activity: include questions and optional imageSpec.',
-                  oneOf: [
-                    { type: 'null' },
-                    {
-                      type: 'object',
-                      properties: {
-                        imageSpec: { type: ['string', 'null'], description: 'Exact visual data for charts/graphs, else null' },
-                        questions: {
-                          type: 'array',
-                          items: {
-                            type: 'object',
-                            properties: {
-                              num: { type: 'integer' },
-                              question: { type: 'string' },
-                              answer: { type: 'string' },
-                            },
-                            required: ['num', 'question', 'answer'],
-                          },
-                        },
-                      },
-                      required: ['questions'],
-                    },
-                  ],
-                },
-              },
-              required: ['pageNum', 'type', 'filename', 'imagePrompt'],
-            },
-          },
-          tptListing: {
-            type: 'object',
-            properties: {
-              title: { type: 'string', description: 'Must follow pattern: "{Topic} {Product Type} | {Grade Level} | {Key Differentiator}". Product Type: Worksheets/Activities Packet/Practice Pages/Unit. Grade Level: e.g. "Grade 3" or "Grades 2–3". Key Differentiator: always "No Prep Printable"; add "SOR-Aligned" for ELA/Phonics/Reading; add "Common Core" for Math+CCSS. Front-load main keyword. Max 80 chars. Example: "Fractions Worksheets | Grade 3 | No Prep Common Core Printable"' },
-              description: { type: 'string' },
-              keywords: { type: 'array', items: { type: 'string' }, minItems: 10, maxItems: 15 },
-              suggestedPrice: { type: 'number' },
-              subjectAreas: { type: 'array', items: { type: 'string' } },
-              tags: { type: 'array', items: { type: 'string' } },
-              teachingDuration: { type: 'string' },
-            },
-            required: ['title', 'description', 'keywords', 'suggestedPrice', 'subjectAreas', 'tags', 'teachingDuration'],
-          },
-          educationStandards: {
-            type: 'object',
-            properties: {
-              framework: { type: ['string', 'null'], enum: ['CCSS', 'NGSS', null] },
-              codes: { type: 'array', items: { type: 'string' }, description: 'Specific standard codes, max 5, only fully-covered standards' },
-            },
-            required: ['framework', 'codes'],
-          },
-        },
-        required: ['setTitle', 'subject', 'gradeLevel', 'themeColor', 'pageCount', 'pages', 'tptListing', 'educationStandards'],
-      },
-    },
-  }]
-
   const MAX_RETRIES = 3
   let plan = null
   const messages = [{ role: 'user', content: prompt }]
+  const client = openai()
 
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
     const result = await withRetry(() => client.chat.completions.create({
-      model: 'gpt-4o',
+      model: MODELS.brainstorm,
       max_tokens: 4000,
-      tools: TOOL_DEF,
+      tools: [worksheetPlanTool],
       tool_choice: { type: 'function', function: { name: 'generate_worksheet_plan' } },
       messages,
-    }))
+    }), { label: 'OpenAI brainstorm' })
 
     const assistantMsg = result.choices[0].message
     const toolCall = assistantMsg.tool_calls?.[0]
@@ -392,7 +210,12 @@ Call the generate_worksheet_plan function with the complete plan.`
   return plan
 }
 
-function validate(plan, maxPages, packageType) {
+/**
+ * Validate a brainstorm candidate plan against structural and taxonomy rules.
+ * Throws on the first hard failure; logs (non-fatal) for filterable issues.
+ * Exported for unit testing.
+ */
+export function validate(plan, maxPages, packageType) {
   if (!plan.setTitle) throw new Error('Missing setTitle')
   if (!Array.isArray(plan.pages) || plan.pages.length < 2)
     throw new Error('pages array must have at least 2 items')

@@ -1,7 +1,9 @@
+// Dry-run entry point — brainstorm + content only, no images/Drive/Telegram/Supabase writes.
+// Invoked as `npm run test:plan` (node scripts/test-plan.js).
 import 'dotenv/config'
-import { brainstorm } from './brainstorm.js'
-import { generateContent, validateAndCorrect } from './generate-content.js'
-import { readTopicHistory } from './topic-history.js'
+import { brainstorm } from '../src/steps/brainstorm.js'
+import { generateContent, validateAndCorrect } from '../src/steps/generate-content.js'
+import { readTopicHistory } from '../src/steps/topic-history.js'
 
 async function main() {
   const packageType = process.env.PACKAGE_TYPE ?? 'small'

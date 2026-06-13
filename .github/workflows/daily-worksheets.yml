@@ -15,10 +15,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - run: npm ci
+
+      # Fast unit-test gate — fail before spending any API budget if the build is broken.
+      - run: npm test
 
       - name: Run pipeline
         run: node scripts/pipeline.js
@@ -38,6 +41,7 @@ jobs:
           MAX_PAGES_PER_SET:           ${{ vars.MAX_PAGES_PER_SET }}
           FREE_WORKSHEET_DAY:          ${{ vars.FREE_WORKSHEET_DAY }}
           LARGE_PACKAGE_DAY:           ${{ vars.LARGE_PACKAGE_DAY }}
+          PAGE_CONCURRENCY:            ${{ vars.PAGE_CONCURRENCY }}
 
       - name: Upload logs
         if: always()

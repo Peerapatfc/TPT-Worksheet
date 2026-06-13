@@ -1,26 +1,14 @@
-import OpenAI from 'openai'
 import sharp from 'sharp'
 import { existsSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import { openai } from '../llm/clients.js'
+import { withRetry } from '../llm/with-retry.js'
+import { MODELS, IMAGE_SIZE } from '../config/constants.js'
 
-const client = new OpenAI()
 const __dirname = dirname(fileURLToPath(import.meta.url))
-
-async function withRetry(fn, maxAttempts = 4, baseDelayMs = 2000) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await fn()
-    } catch (err) {
-      const retryable = err.status === 429 || err.status === 503 || err.status === 500
-      if (!retryable || attempt === maxAttempts) throw err
-      const delay = baseDelayMs * 2 ** (attempt - 1)
-      console.warn(`OpenAI ${err.status} on attempt ${attempt}/${maxAttempts} — retrying in ${delay}ms`)
-      await new Promise(r => setTimeout(r, delay))
-    }
-  }
-}
-const LOGO_PATH = join(__dirname, '..', 'logo.png')
+// src/steps/generate-marketing-slides.js -> repo-root/logo.png
+const LOGO_PATH = join(__dirname, '..', '..', 'logo.png')
 const LOGO_SIZE = 80
 const LOGO_MARGIN = 20
 
@@ -42,12 +30,12 @@ async function compositeLogo(slideBuffer) {
 }
 
 async function generateSlide(prompt, quality = 'medium') {
-  const response = await withRetry(() => client.images.generate({
-    model: 'gpt-image-2',
+  const response = await withRetry(() => openai().images.generate({
+    model: MODELS.image,
     prompt,
-    size: '1024x1024',
+    size: IMAGE_SIZE.slide,
     quality,
-  }))
+  }), { label: 'OpenAI marketing slide' })
   if (!response.data?.[0]?.b64_json) throw new Error('OpenAI image API returned no data')
   return Buffer.from(response.data[0].b64_json, 'base64')
 }
