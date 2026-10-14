@@ -4,6 +4,7 @@ import { withRetry } from '../llm/with-retry.js'
 import { MODELS, IMAGE_SIZE } from '../config/constants.js'
 import { mapWithConcurrency } from '../lib/concurrency.js'
 import { recordUsage } from '../lib/cost-tracker.js'
+import { addReviewNote } from '../lib/review-notes.js'
 import { answerKeySvg, renderSvg } from '../lib/svg-templates.js'
 import { validatePage } from './validate-page.js'
 import { reconcilePageContent } from './reconcile-content.js'
@@ -77,6 +78,7 @@ async function generateOnePage(plan, page) {
 
     if (attempt === MAX_ATTEMPTS) {
       console.warn(`Page ${page.pageNum} failed validation after ${MAX_ATTEMPTS} attempts: ${validation.issues.join(', ')}`)
+      addReviewNote('qa_failed', `p${page.pageNum} (${page.filename}): ${validation.issues.filter(i => i.startsWith('[critical]')).join('; ')}`)
     } else {
       console.log(`Page ${page.pageNum} validation failed (attempt ${attempt}/${MAX_ATTEMPTS}): ${validation.issues.join(', ')} — retrying...`)
     }

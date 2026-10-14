@@ -4,6 +4,7 @@ import { groq } from '../llm/clients.js'
 import { callTool } from '../llm/tool-call.js'
 import { MODELS } from '../config/constants.js'
 import { slugify } from '../lib/slugify.js'
+import { addReviewNote } from '../lib/review-notes.js'
 
 const contentTool = {
   type: 'function',
@@ -129,11 +130,13 @@ Call the generate_page_content function with content for all pages.`
     })
   } catch (err) {
     console.warn(`generateContent fetch failed (${err.status ?? err.message})`)
+    addReviewNote('fallback', `Q&A generation failed (${err.status ?? err.message}) — used brainstorm's questions`)
     return null
   }
 
   if (!res.args) {
     console.warn('generateContent: no tool call returned')
+    addReviewNote('fallback', "Q&A generation returned nothing — used brainstorm's questions")
     return null
   }
   return res.args
@@ -202,6 +205,7 @@ Call the validate_content function with your assessment.`
     })
   } catch (err) {
     console.warn(`validateAndCorrect failed (${err.status ?? err.message}) — using content as-is`)
+    addReviewNote('fallback', `Q&A recheck failed (${err.status ?? err.message}) — answers were not double-checked`)
     return contentData
   }
 
@@ -224,6 +228,11 @@ Call the validate_content function with your assessment.`
       if (fix) {
         if (fix.correctedQuestion) console.log(`  p${page.pageNum} q${q.num} question: "${q.question}" → "${fix.correctedQuestion}"`)
         console.log(`  p${page.pageNum} q${q.num}: "${q.answer}" → "${fix.correctedAnswer}" (${fix.reason})`)
+        if (fix.correctedQuestion) {
+          addReviewNote('question_rewritten', `p${page.pageNum} q${q.num}: "${q.question}" → "${fix.correctedQuestion}" (answer: ${fix.correctedAnswer})`)
+        } else if (fix.correctedAnswer !== q.answer) {
+          addReviewNote('answer_corrected', `p${page.pageNum} q${q.num} "${q.question}": ${q.answer} → ${fix.correctedAnswer}`)
+        }
         return { ...q, question: fix.correctedQuestion || q.question, answer: fix.correctedAnswer }
       }
       return q
@@ -257,6 +266,7 @@ export function stripAnswerLeaks(contentData) {
     }
     if (spec !== page.imageSpec) {
       console.warn(`p${page.pageNum}: removed answers from imageSpec`)
+      addReviewNote('answer_leak', `p${page.pageNum}: removed answers from the image spec — confirm none are printed on the page`)
       page.imageSpec = spec
     }
   }
@@ -279,6 +289,7 @@ export async function generateContent(plan) {
       console.warn(`generateContent schema (attempt ${attempt}/${MAX_RETRIES + 1}): ${schemaIssues.join(', ')}`)
       if (attempt <= MAX_RETRIES) continue
       console.warn('generateContent: schema still invalid after retries — using best available content')
+      addReviewNote('fallback', `Q&A content still had schema issues after retries: ${schemaIssues.join(', ')}`)
     }
 
     contentData = stripAnswerLeaks(await validateAndCorrect(plan, contentData))
