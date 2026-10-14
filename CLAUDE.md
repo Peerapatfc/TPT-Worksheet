@@ -33,6 +33,7 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 - **Grayscale post-processing** — gpt-image-2 always generates color images. `sharp(buffer).grayscale()` enforces blackline printable output. Grayscale is computed **once per page** and reused for the per-page and combined grayscale PDFs.
 - **Color PNG + Grayscale PDF** — PNGs stay color (TPT listing preview). `sharp().grayscale()` applied only when embedding into PDF (printable B&W). Both uploaded per page.
 - **Combined PDF** — merged all pages into `{slug}-complete-set.pdf`. TPT requires 1 uploadable file per listing; combined PDF serves this. Individual PDFs also uploaded for preview.
+- **gpt-image-2 quality** — worksheet/activity pages use `low` (~$0.006/page vs ~$0.042 at `medium`; text and chart values were as crisp/exact in side-by-side tests). The cover and the marketing cover stay `medium`.
 - **gpt-image-2 size** — use `1024x1536` (portrait, closer to A4). `1024x1024` leaves large white margins after aspect-ratio fit to A4.
 - **Supabase for history** — GitHub Actions filesystem resets every run; local file won't persist. Drive file also works but Supabase is cleaner.
 - **Dynamic page count** — brainstorm (gpt-4o) decides how many worksheet/activity pages within the tier range. Answer-key pages are rebuilt in code (`normalizeAnswerKeys`): ceil(N/2) keys at the end, each covering 2 consecutive content pages, pages renumbered 1..n — the model's own answer-key count is ignored, so a miscount never costs a brainstorm retry.
