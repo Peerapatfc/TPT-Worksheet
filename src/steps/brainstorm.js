@@ -17,6 +17,69 @@ export function largestEvenN(pageMax) {
 }
 
 /**
+ * Rebuild the answer-key pages deterministically instead of trusting the model's
+ * count: keep every non-answer-key page in order, append ceil(N/2) answer keys
+ * that each cover 2 consecutive content pages, and renumber pageNum 1..n.
+ * Mutates and returns the plan. Pure (no IO) — exported for unit testing.
+ */
+export function normalizeAnswerKeys(plan) {
+  if (!Array.isArray(plan?.pages)) return plan
+  const pages = plan.pages.filter(p => p.type !== 'answer_key')
+  pages.forEach((p, i) => { p.pageNum = i + 1 })
+  const contentPages = pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
+  for (let i = 0; i < contentPages.length; i += 2) {
+    const sourcePageNums = contentPages.slice(i, i + 2).map(p => p.pageNum)
+    pages.push({
+      pageNum: pages.length + 1,
+      type: 'answer_key',
+      filename: `answer_key_page_${i / 2 + 1}`,
+      imagePrompt: `Answer key for pages ${sourcePageNums.join(' & ')}`,
+      sourcePageNums,
+      content: null,
+    })
+  }
+  plan.pages = pages
+  return plan
+}
+
+const STANDARDS_PATTERNS = {
+  CCSS: /\b(CCSS|Common[\s-]Core)\b/i,
+  NGSS: /\b(NGSS|Next Generation Science Standards)\b/i,
+}
+
+/**
+ * Remove CCSS/NGSS alignment claims the plan can't back up. A framework may only
+ * be mentioned if plan.educationStandards names it with at least one code — the
+ * model sometimes writes "Aligned to Common Core" for e.g. Health. Strips the
+ * offending description sentences, title words, and keywords.
+ * Mutates and returns the plan. Pure (no IO) — exported for unit testing.
+ */
+export function sanitizeStandardsClaims(plan) {
+  const listing = plan?.tptListing
+  if (!listing) return plan
+  const backed = plan.educationStandards?.codes?.length ? plan.educationStandards.framework : null
+  const unbacked = Object.entries(STANDARDS_PATTERNS).filter(([fw]) => fw !== backed).map(([, re]) => re)
+  const claims = (text) => unbacked.some(re => re.test(text ?? ''))
+
+  if (claims(listing.description)) {
+    listing.description = listing.description
+      .split(/(?<=[.!?])\s+/)
+      .filter(sentence => !claims(sentence))
+      .join(' ')
+  }
+  if (claims(listing.title)) {
+    listing.title = unbacked
+      .reduce((t, re) => t.replace(new RegExp(re.source, 'gi'), ''), listing.title)
+      .replace(/\s{2,}/g, ' ')
+      .replace(/\s+\|/g, ' |')
+      .replace(/\|\s*(?=\||$)/g, '') // drop segments left empty
+      .trim()
+  }
+  if (Array.isArray(listing.keywords)) listing.keywords = listing.keywords.filter(k => !claims(k))
+  return plan
+}
+
+/**
  * Pick a topic and plan a full worksheet set in a single forced tool call.
  * Retries up to MAX_RETRIES times, feeding validation errors back to the model.
  */
@@ -114,6 +177,7 @@ Step 7: For every worksheet and activity page, populate the "content" field:
 - "questions": array of EVERY question/exercise on that page with its correct answer. Number them sequentially across ALL worksheet/activity pages (q1, q2, q3... continuing from page to page — do NOT restart at 1 per page).
 - "imageSpec": if the page contains a picture graph, bar chart, tally chart, data table, or number line with specific values — describe the EXACT values (e.g. "picture graph: cats=5, dogs=8, fish=3"). Otherwise set null.
 - cover and answer_key pages: set content to null.
+- Every question must have exactly ONE correct, verifiable answer. No opinion or guessing questions ("who is likely…", "what do you think…"), and no negative questions ("which does NOT…") unless exactly one option fits.
 The answer key image will be generated using ONLY these questions and answers — so they must be complete and correct.
 
 Step 8: For educationStandards, pick 2–5 specific standard codes that this resource FULLY covers:
@@ -165,7 +229,8 @@ Call the generate_worksheet_plan function with the complete plan.`
     const toolCall = assistantMsg.tool_calls?.[0]
     if (!toolCall) throw new Error('OpenAI did not return a tool call for generate_worksheet_plan')
 
-    const candidate = JSON.parse(toolCall.function.arguments)
+    // Answer-key structure is derived in code, so a miscounted set never costs a retry.
+    const candidate = normalizeAnswerKeys(JSON.parse(toolCall.function.arguments))
 
     try {
       validate(candidate, maxPages, packageType)
@@ -191,22 +256,13 @@ Call the generate_worksheet_plan function with the complete plan.`
 
   plan.pageCount = plan.pages.length
 
-  for (const p of plan.pages) {
-    if (!p.filename.endsWith('.png')) p.filename = p.filename.replace(/\.[^.]+$/, '') + '.png'
-  }
+  // Filenames are stored without an extension; upload-drive appends .png / .pdf.
+  for (const p of plan.pages) p.filename = p.filename.replace(/\.(png|pdf|jpe?g)$/i, '')
+
+  sanitizeStandardsClaims(plan)
 
   plan.tptListing.subjectAreas = plan.tptListing.subjectAreas.filter(a => TPT_SUBJECT_AREAS.includes(a))
   plan.tptListing.tags = plan.tptListing.tags.filter(t => TPT_TAGS.includes(t))
-
-  // Auto-assign sourcePageNums by position for any answer_key missing it
-  const contentPages = plan.pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
-  plan.pages.filter(p => p.type === 'answer_key').forEach((ak, i) => {
-    if (!ak.sourcePageNums?.length) {
-      const pair = contentPages.slice(i * 2, i * 2 + 2).map(p => p.pageNum)
-      ak.sourcePageNums = pair
-      console.warn(`Auto-assigned sourcePageNums=${JSON.stringify(pair)} to answer_key p${ak.pageNum}`)
-    }
-  })
 
   plan.packageType = packageType
   return plan
