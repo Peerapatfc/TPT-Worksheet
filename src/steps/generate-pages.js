@@ -57,7 +57,10 @@ async function generateOnePage(plan, page) {
       model: MODELS.image,
       prompt,
       size: page.type === 'cover' ? IMAGE_SIZE.cover : IMAGE_SIZE.page,
-      quality: 'medium',
+      // Cover stays medium (first thing buyers see). Worksheet/activity pages use low:
+      // ~158 vs ~1,372 output tokens (~$0.006 vs ~$0.042) with equally crisp text and
+      // exact chart values in side-by-side tests.
+      quality: page.type === 'cover' ? 'medium' : 'low',
     }), { label: `OpenAI image p${page.pageNum}` })
     recordUsage(page.type === 'cover' ? 'cover_image' : 'page_image', MODELS.image, response.usage)
 
