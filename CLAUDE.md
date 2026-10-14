@@ -59,6 +59,7 @@ scripts/                  entry points only
   pipeline.js             CI entry — imports src/run-pipeline.js
   test-plan.js            dry-run entry (brainstorm + content)
   create-issue.js         opens a GitHub Issue on pipeline failure
+  eval.js                 live regression eval of the validator + Groq recheck (eval/cases.json)
   get-refresh-token.js    OAuth2 refresh-token helper (run locally; prints token)
   test-drive-upload.js    Drive auth smoke test (local only, gitignored)
 src/
@@ -89,6 +90,7 @@ src/
     notify-telegram.js    Telegram cover photo + MarkdownV2 caption
     schema/worksheet-plan.js  brainstorm tool-call JSON schema
 test/                     vitest unit tests for the pure-logic surface
+eval/                     live eval cases (cases.json) + fixture images from real runs; run by scripts/eval.js
 ```
 
 ## Environment Variables
@@ -136,6 +138,7 @@ cp .env.example .env   # fill all values
 npm install
 npm test                            # unit tests (no API keys needed)
 npm run test:plan                   # dry-run: brainstorm + content only
+npm run eval                        # live LLM regression eval (~$0.11; run before changing a prompt)
 node scripts/test-drive-upload.js   # verify Drive auth
 npm start                           # full pipeline run
 ```
