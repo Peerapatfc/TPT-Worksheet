@@ -2,8 +2,8 @@ import sharp from 'sharp'
 import { openai } from '../llm/clients.js'
 import { withRetry } from '../llm/with-retry.js'
 import { MODELS, IMAGE_SIZE } from '../config/constants.js'
-import { resolveSourceQuestions } from '../lib/source-pages.js'
 import { mapWithConcurrency } from '../lib/concurrency.js'
+import { answerKeySvg, renderSvg } from '../lib/svg-templates.js'
 import { validatePage } from './validate-page.js'
 import { reconcilePageContent } from './reconcile-content.js'
 
@@ -20,20 +20,30 @@ const TYPE_STYLE = {
   cover: 'COVER PAGE: Large decorative title centered on page. Student name line and date line below title. Decorative thematic border or illustration. NO questions, NO exercises, NO answer spaces. Title page only.',
   worksheet: 'WORKSHEET PAGE: Clear instruction line at top. Numbered exercise items with ample blank writing space for student answers. Ruled lines or answer boxes as needed.',
   activity: 'ACTIVITY PAGE: Engaging activity layout with clear instructions. Interactive elements such as matching, cut-and-paste areas, drawing boxes, or fill-in diagrams. Ample space for student work.',
-  answer_key: 'ANSWER KEY PAGE: Label "Answer Key" prominently at top. Show numbered text answers only — bold answer number + correct answer text. DO NOT redraw any matching diagrams, coloring grids, picture graphs, or activity visuals from the worksheet. All answers must be text-based.',
 }
 
 /**
  * Generate every page image for a plan.
  *
- * Pages are generated with bounded concurrency (env `PAGE_CONCURRENCY`, default 1
- * = sequential, preserving the original cost/rate-limit profile). Each page is
- * image-generated, vision-validated, and (if it has an imageSpec) answer-reconciled,
- * retrying up to MAX_ATTEMPTS on validation failure. Output order matches plan.pages.
+ * Cover/worksheet/activity pages go through gpt-image-2 with bounded concurrency
+ * (env `PAGE_CONCURRENCY`, default 1 = sequential). Each is vision-validated and
+ * (if it has an imageSpec) answer-reconciled, retrying up to MAX_ATTEMPTS on
+ * validation failure. Answer keys are pure text, so they are rendered locally from
+ * an SVG template — no image/QA cost — and only after every other page is done, so
+ * they reflect reconciled answers. Output order matches plan.pages.
  */
 export async function generatePages(plan) {
   const concurrency = parseInt(process.env.PAGE_CONCURRENCY ?? '1', 10) || 1
-  return mapWithConcurrency(plan.pages, concurrency, page => generateOnePage(plan, page))
+  const aiPages = plan.pages.filter(p => p.type !== 'answer_key')
+  const generated = await mapWithConcurrency(aiPages, concurrency, page => generateOnePage(plan, page))
+
+  let next = 0
+  return Promise.all(plan.pages.map(async page => {
+    if (page.type !== 'answer_key') return generated[next++]
+    const buffer = await renderSvg(answerKeySvg(plan, page))
+    console.log(`Rendered answer key page ${page.pageNum}/${plan.pageCount}: ${page.filename}`)
+    return { ...page, buffer }
+  }))
 }
 
 async function generateOnePage(plan, page) {
@@ -46,7 +56,7 @@ async function generateOnePage(plan, page) {
       model: MODELS.image,
       prompt,
       size: page.type === 'cover' ? IMAGE_SIZE.cover : IMAGE_SIZE.page,
-      quality: page.type === 'cover' ? 'high' : page.type === 'answer_key' ? 'low' : 'medium',
+      quality: page.type === 'cover' ? 'high' : 'medium',
     }), { label: `OpenAI image p${page.pageNum}` })
 
     if (!response.data?.[0]?.b64_json) throw new Error(`OpenAI image API returned no data for page ${page.pageNum}`)
@@ -71,26 +81,15 @@ async function generateOnePage(plan, page) {
 }
 
 /**
- * Build the full gpt-image-2 prompt for a single page. Pure function (no IO) —
- * exported for unit testing.
+ * Build the full gpt-image-2 prompt for a cover/worksheet/activity page (answer
+ * keys are template-rendered). Pure function (no IO) — exported for unit testing.
  */
 export function buildPrompt(plan, page) {
   const typeStyle = TYPE_STYLE[page.type] ?? TYPE_STYLE.worksheet
-  const pageLabel = page.type === 'answer_key' && page.sourcePageNums?.length
-    ? `Answer Key (Pages ${page.sourcePageNums.join(' & ')})`
-    : `Page ${page.pageNum} of ${plan.pageCount}`
-  const headerInfo = `"${plan.setTitle}" | ${plan.gradeLevel} | ${pageLabel}`
+  const headerInfo = `"${plan.setTitle}" | ${plan.gradeLevel} | Page ${page.pageNum} of ${plan.pageCount}`
 
   let contentBlock = ''
-  if (page.type === 'answer_key') {
-    const { nums, questions } = resolveSourceQuestions(page, plan.pages)
-    let seq = 1
-    const qaLines = questions.map(q => `${seq++}. ${q.question} → ${q.answer}`)
-    if (qaLines.length > 0) {
-      const forLabel = nums.length > 0 ? ` for Pages ${nums.join(' & ')}` : ''
-      contentBlock = ` Answers${forLabel} — text only, do not redraw any diagrams:\n${qaLines.join('\n')}`
-    }
-  } else if (page.content) {
+  if (page.content) {
     const specPart = page.content.imageSpec
       ? ` EXACT VISUAL DATA — draw precisely as specified: ${page.content.imageSpec}`
       : ''
