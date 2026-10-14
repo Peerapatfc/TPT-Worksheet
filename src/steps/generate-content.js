@@ -60,6 +60,7 @@ const validateTool = {
               pageNum: { type: 'integer' },
               questionNum: { type: 'integer' },
               correctedAnswer: { type: 'string' },
+              correctedQuestion: { type: 'string', description: 'Rewritten question, only when the original is ambiguous or opinion-based' },
               reason: { type: 'string' },
             },
             required: ['pageNum', 'questionNum', 'correctedAnswer', 'reason'],
@@ -103,6 +104,11 @@ STEP 2 — Generate Q&A from your imageSpec:
 - ${plan.packageType === 'free' ? '4–5' : plan.packageType === 'large' ? '5–8' : '4–6'} questions per page, appropriate for ${plan.gradeLevel}
 - For Math: use exact numbers from imageSpec. For ELA: clear sentence prompts. For Science/Social Studies: fact-based.
 - All answers must be factually and academically correct.
+- Every question must have exactly ONE correct answer that can be checked against the imageSpec or established facts.
+- Do NOT ask opinion or guessing questions ("Who is likely to…", "What do you think…", "Which is your favorite…").
+- Do NOT ask about details the imageSpec does not define (e.g. who is speaking when the speaker isn't specified).
+- Avoid negative questions ("Which direction does X NOT…", "Which is not…") unless exactly one option fits.
+- For open-ended "why/explain" questions, give one concise model answer.
 
 Pages:
 ${pageDescriptions}
@@ -172,7 +178,9 @@ Review every question and answer below. For each item check ALL of:
 2. The answer actually and specifically answers its question — not just correct in isolation
 3. If the page has an imageSpec, the answer must be derivable from the exact data in that imageSpec (e.g. if imageSpec says Bananas=7, answer to "how many bananas?" must be 7)
 4. The question is appropriate in difficulty for ${plan.gradeLevel} level
-5. If wrong, mismatched, or inappropriate, provide the corrected answer
+5. The question has exactly ONE correct answer. Flag opinion/guessing questions ("who is likely…", "what do you think…"), questions about details the imageSpec doesn't define, and negative questions with several valid answers (e.g. "Which direction does Alex NOT patrol?" when three directions fit).
+6. If the answer is wrong, mismatched, or inappropriate, provide correctedAnswer.
+7. If the QUESTION itself fails check 5, rewrite it as correctedQuestion (same topic and difficulty, one verifiable answer) and give its correctedAnswer. Never answer an ambiguous question with "not specified" or "it depends" — rewrite the question instead.
 
 ${JSON.stringify(contentData.pages, null, 2)}
 
@@ -182,7 +190,7 @@ Call the validate_content function with your assessment.`
   try {
     res = await callTool(groq(), {
       model: MODELS.content,
-      maxTokens: 2048,
+      maxTokens: 4096, // gpt-oss is a reasoning model; reasoning tokens count toward this
       tool: validateTool,
       messages: [{ role: 'user', content: prompt }],
       label: 'Groq validate',
@@ -196,7 +204,8 @@ Call the validate_content function with your assessment.`
   if (!res.args) return contentData
   const validation = res.args
 
-  if (validation.pass || !validation.corrections?.length) return contentData
+  // Apply any corrections even if the model also said pass:true.
+  if (!validation.corrections?.length) return contentData
 
   console.log(`Content accuracy: ${validation.corrections.length} correction(s) applied`)
 
@@ -209,8 +218,9 @@ Call the validate_content function with your assessment.`
     questions: page.questions.map(q => {
       const fix = correctionMap.get(`${page.pageNum}-${q.num}`)
       if (fix) {
+        if (fix.correctedQuestion) console.log(`  p${page.pageNum} q${q.num} question: "${q.question}" → "${fix.correctedQuestion}"`)
         console.log(`  p${page.pageNum} q${q.num}: "${q.answer}" → "${fix.correctedAnswer}" (${fix.reason})`)
-        return { ...q, answer: fix.correctedAnswer }
+        return { ...q, question: fix.correctedQuestion || q.question, answer: fix.correctedAnswer }
       }
       return q
     }),
