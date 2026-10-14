@@ -9,8 +9,8 @@ const FONT = 'DejaVu Sans, Helvetica, Arial, sans-serif'
 const DEFAULT_COLOR = '#1B4F8A'
 const GRAY = '#555555'
 
-const PAGE_W = 1024
-const PAGE_H = 1536
+export const PAGE_W = 1024
+export const PAGE_H = 1536
 const SLIDE = 1024
 
 export const safeColor = (hex) => (/^#[0-9A-Fa-f]{6}$/.test(hex ?? '') ? hex : DEFAULT_COLOR)
@@ -44,7 +44,7 @@ export function wrapText(text, maxWidth, fontSize, bold = false) {
   return lines.length ? lines : ['']
 }
 
-const text = (x, y, content, { size, weight = 'normal', fill = '#000', anchor = 'start', style = 'normal' }) =>
+export const text = (x, y, content, { size, weight = 'normal', fill = '#000', anchor = 'start', style = 'normal' }) =>
   `<text x="${x}" y="${y}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" font-style="${style}" fill="${fill}" text-anchor="${anchor}">${escapeXml(content)}</text>`
 
 const checkmark = (cx, cy, r, color) =>
@@ -120,6 +120,16 @@ export function answerKeySvg(plan, page) {
     return text(left + it.indent, y, it.text, { size: it.size, fill: GRAY, style: 'italic' })
   }).join('')
 
+  return pageSvg(plan, label, `${text(PAGE_W / 2, 230, 'Answer Key', { size: 60, weight: 'bold', fill: color, anchor: 'middle' })}
+${body}`)
+}
+
+/**
+ * Full portrait page: white background, theme-color border and header bar with
+ * the set title and "{grade} | {label}" — the frame every template page shares.
+ */
+export function pageSvg(plan, label, body) {
+  const color = safeColor(plan.themeColor)
   const title = wrapText(plan.setTitle, PAGE_W - 120, 34, true)[0]
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}" viewBox="0 0 ${PAGE_W} ${PAGE_H}">
 <rect width="100%" height="100%" fill="#fff"/>
@@ -127,7 +137,6 @@ export function answerKeySvg(plan, page) {
 <rect x="21" y="21" width="${PAGE_W - 42}" height="118" fill="${color}"/>
 ${text(PAGE_W / 2, 72, title, { size: 34, weight: 'bold', fill: '#fff', anchor: 'middle' })}
 ${text(PAGE_W / 2, 116, `${plan.gradeLevel ?? ''} | ${label}`, { size: 24, weight: 'bold', fill: '#fff', anchor: 'middle' })}
-${text(PAGE_W / 2, 230, 'Answer Key', { size: 60, weight: 'bold', fill: color, anchor: 'middle' })}
 ${body}
 </svg>`
 }
