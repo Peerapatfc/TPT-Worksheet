@@ -190,7 +190,9 @@ Call the validate_content function with your assessment.`
   try {
     res = await callTool(groq(), {
       model: MODELS.content,
-      maxTokens: 4096, // gpt-oss is a reasoning model; reasoning tokens count toward this
+      // gpt-oss is a reasoning model: reasoning tokens count toward this. A 59-question
+      // small set used ~3.5k (3k reasoning); 2048 ran out and Groq returned 400 tool_use_failed.
+      maxTokens: 8192,
       tool: validateTool,
       messages: [{ role: 'user', content: prompt }],
       label: 'Groq validate',
