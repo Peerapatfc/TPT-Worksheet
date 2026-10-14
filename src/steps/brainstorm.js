@@ -175,12 +175,7 @@ Step 5: Estimate teachingDuration in minutes (e.g. "30 minutes", "45-60 minutes"
 
 Step 6: Pick a themeColor — one hex color code (e.g. "#1B4F8A", "#2E7D32", "#6A1B9A") that matches the topic's mood. Must be a dark, saturated color suitable for a professional worksheet border and header bar. This exact hex will be used on EVERY page of this set.
 
-Step 7: For every worksheet and activity page, populate the "content" field:
-- "questions": array of EVERY question/exercise on that page with its correct answer. Number them sequentially across ALL worksheet/activity pages (q1, q2, q3... continuing from page to page — do NOT restart at 1 per page).
-- "imageSpec": if the page contains a picture graph, bar chart, tally chart, data table, or number line with specific values — describe the EXACT values (e.g. "picture graph: cats=5, dogs=8, fish=3"). Otherwise set null.
-- cover and answer_key pages: set content to null.
-- Every question must have exactly ONE correct, verifiable answer. No opinion or guessing questions ("who is likely…", "what do you think…"), and no negative questions ("which does NOT…") unless exactly one option fits.
-The answer key image will be generated using ONLY these questions and answers — so they must be complete and correct.
+Step 7: For each worksheet/activity page, write an imagePrompt describing the activity (its skill and layout). Do NOT write the questions — they are generated in a later step.
 
 Step 8: For educationStandards, pick 2–5 specific standard codes that this resource FULLY covers:
 - Math or ELA subject → framework: "CCSS", codes using exact format:

@@ -130,13 +130,11 @@ Call the generate_page_content function with content for all pages.`
     })
   } catch (err) {
     console.warn(`generateContent fetch failed (${err.status ?? err.message})`)
-    addReviewNote('fallback', `Q&A generation failed (${err.status ?? err.message}) — used brainstorm's questions`)
     return null
   }
 
   if (!res.args) {
     console.warn('generateContent: no tool call returned')
-    addReviewNote('fallback', "Q&A generation returned nothing — used brainstorm's questions")
     return null
   }
   return res.args
@@ -273,6 +271,12 @@ export function stripAnswerLeaks(contentData) {
   return contentData
 }
 
+/**
+ * Generate every worksheet/activity page's Q&A + imageSpec on Groq, recheck it,
+ * and attach it to the plan. Essential: brainstorm no longer writes questions,
+ * so if Groq returns nothing after all attempts the run fails rather than
+ * shipping pages without content.
+ */
 export async function generateContent(plan) {
   const contentPages = plan.pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
   if (contentPages.length === 0) return plan
@@ -282,7 +286,10 @@ export async function generateContent(plan) {
 
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
     contentData = await fetchContent(plan, contentPages)
-    if (!contentData) return plan
+    if (!contentData) {
+      if (attempt <= MAX_RETRIES) continue
+      throw new Error(`Q&A generation failed after ${MAX_RETRIES + 1} attempts — see "generateContent" warnings above`)
+    }
 
     const schemaIssues = validateSchema(contentData, contentPages, plan.packageType)
     if (schemaIssues.length > 0) {

@@ -24,31 +24,6 @@ export const worksheetPlanTool = {
               sourcePageNums: { type: 'array', items: { type: 'integer' }, description: 'answer_key pages only: exactly 2 pageNums of the worksheets this page answers' },
               filename: { type: 'string' },
               imagePrompt: { type: 'string' },
-              content: {
-                description: 'null for cover/answer_key pages. For worksheet/activity: include questions and optional imageSpec.',
-                oneOf: [
-                  { type: 'null' },
-                  {
-                    type: 'object',
-                    properties: {
-                      imageSpec: { type: ['string', 'null'], description: 'Exact visual data for charts/graphs, else null' },
-                      questions: {
-                        type: 'array',
-                        items: {
-                          type: 'object',
-                          properties: {
-                            num: { type: 'integer' },
-                            question: { type: 'string' },
-                            answer: { type: 'string' },
-                          },
-                          required: ['num', 'question', 'answer'],
-                        },
-                      },
-                    },
-                    required: ['questions'],
-                  },
-                ],
-              },
             },
             required: ['pageNum', 'type', 'filename', 'imagePrompt'],
           },
