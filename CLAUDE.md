@@ -50,7 +50,7 @@ scripts/                  entry points only
   pipeline.js             CI entry — imports src/run-pipeline.js
   test-plan.js            dry-run entry (brainstorm + content)
   create-issue.js         opens a GitHub Issue on pipeline failure
-  get-refresh-token.js    one-time OAuth2 setup (local only, gitignored)
+  get-refresh-token.js    OAuth2 refresh-token helper (run locally; prints token)
   test-drive-upload.js    Drive auth smoke test (local only, gitignored)
 src/
   run-pipeline.js         orchestrator — runs every step in order
