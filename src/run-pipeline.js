@@ -9,6 +9,7 @@ import { readTopicHistory, saveTopicEntry } from './steps/topic-history.js'
 import { appendLog } from './lib/logger.js'
 import { getPackageType } from './lib/package-type.js'
 import { costSummary } from './lib/cost-tracker.js'
+import { addReviewNote, reviewNotes, buildReviewMessage } from './lib/review-notes.js'
 
 /**
  * Full daily pipeline: history → brainstorm → content → images (+ marketing) →
@@ -63,6 +64,7 @@ async function runSteps() {
     generatePages(planWithContent),
     generateMarketingSlides(planWithContent).catch(err => {
       console.warn(`Marketing slides failed — continuing without them: ${err.message}`)
+      addReviewNote('fallback', `Marketing slides failed (${err.message}) — none uploaded`)
       appendLog({ step: 'generate_marketing_slides', status: 'warn', error: err.message })
       return []
     }),
@@ -87,8 +89,11 @@ async function runSteps() {
 
   // Non-essential: the set is already uploaded and saved, so a notification
   // failure (e.g. a network timeout to Telegram) must not fail the run.
+  const notes = reviewNotes()
+  appendLog({ step: 'review', count: notes.length, notes })
+  const reviewText = buildReviewMessage(plan.setTitle, notes, costSummary().totalUsd)
   try {
-    await notifyTelegram(plan, pagesWithPdf[0].buffer, folder.link)
+    await notifyTelegram(plan, pagesWithPdf[0].buffer, folder.link, reviewText)
     appendLog({ step: 'telegram', status: 'ok' })
   } catch (err) {
     console.warn(`Telegram notification failed — continuing: ${err.message}`)
