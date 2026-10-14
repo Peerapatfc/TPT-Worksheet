@@ -171,6 +171,16 @@ export function validateSchema(contentData, contentPages, packageType = 'small')
   return issues
 }
 
+// A rewrite that turns a question into one about where something sits on the
+// page ("Which habitat is listed second on the right side?") tests nothing; the
+// recheck kept producing these for matching pages despite the prompt rule.
+const LAYOUT_QUESTION = /\b(listed|shown|appears?|placed|located)\b[^?]*\b(first|second|third|fourth|fifth|last|top|bottom)\b|\b(left|right)[\s-](side|column)\b|\b(top|bottom) of the (page|column|list)\b/i
+
+/** True if a rewritten question only asks about page layout/position. Pure — exported for unit testing. */
+export function isLayoutQuestion(question) {
+  return LAYOUT_QUESTION.test(question ?? '')
+}
+
 export async function validateAndCorrect(plan, contentData) {
   const prompt = `You are an academic fact-checker for elementary school worksheets.
 
@@ -179,7 +189,7 @@ Set: "${plan.setTitle}" | Grade: ${plan.gradeLevel} | Subject: ${plan.subject}
 Review every question and answer below. For each item check ALL of:
 1. The answer is academically correct (math calculations, spelling, grammar, facts, logic)
 2. The answer actually and specifically answers its question — not just correct in isolation
-3. If the page has an imageSpec, the answer must be derivable from the exact data in that imageSpec (e.g. if imageSpec says Bananas=7, answer to "how many bananas?" must be 7)
+3. If the question asks the student to READ data from the picture (counts, chart/table values, labels), its answer must match the exact data in the imageSpec (e.g. if imageSpec says Bananas=7, "how many bananas?" must be 7). Questions answered from subject knowledge — e.g. a matching page asking which habitat a spider lives in — do NOT need to be derivable from the imageSpec; only check that the answer is correct.
 4. The question is appropriate in difficulty for ${plan.gradeLevel} level
 5. The question has exactly ONE correct answer. Flag opinion/guessing questions ("who is likely…", "what do you think…"), questions that ask the student to read a visual detail the imageSpec doesn't define, and negative questions with several valid answers (e.g. "Which direction does Alex NOT patrol?" when three directions fit). Knowledge questions whose answer comes from the subject matter rather than the picture are FINE (e.g. a matching page "Which habitat matches the wolf spider?") — do not flag them.
 6. If the answer is wrong, mismatched, or inappropriate, provide correctedAnswer.
@@ -223,6 +233,10 @@ Call the validate_content function with your assessment.`
     ...page,
     questions: page.questions.map(q => {
       const fix = correctionMap.get(`${page.pageNum}-${q.num}`)
+      if (fix?.correctedQuestion && isLayoutQuestion(fix.correctedQuestion)) {
+        console.warn(`  p${page.pageNum} q${q.num}: ignored layout-only rewrite "${fix.correctedQuestion}" — keeping the original question`)
+        return q
+      }
       if (fix) {
         if (fix.correctedQuestion) console.log(`  p${page.pageNum} q${q.num} question: "${q.question}" → "${fix.correctedQuestion}"`)
         console.log(`  p${page.pageNum} q${q.num}: "${q.answer}" → "${fix.correctedAnswer}" (${fix.reason})`)
