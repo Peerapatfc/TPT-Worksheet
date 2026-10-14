@@ -37,6 +37,7 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 - **Supabase for history** — GitHub Actions filesystem resets every run; local file won't persist. Drive file also works but Supabase is cleaner.
 - **Dynamic page count** — brainstorm (gpt-4o) decides how many pages within the tier range. Answer-key pages are always grouped at the end.
 - **Template-rendered text pages** — answer keys and the "What's Included" / "Benefits" marketing slides are pure text, so they are rendered locally from SVG templates (`src/lib/svg-templates.js` → sharp PNG) instead of gpt-image-2. No image or vision-QA cost, and answer keys print the exact Q&A data. Answer keys are rendered after all AI pages finish so they reflect reconciled answers. Only the cover, worksheet and activity pages (plus the marketing cover) use gpt-image-2.
+- **Cost logging** — every API call records its `usage` into `src/lib/cost-tracker.js` under a step bucket (`brainstorm`, `content`, `content_recheck`, `cover_image`, `page_image`, `validate_page`, `reconcile_page`, `marketing_image`). The pipeline appends one `{"step":"cost",...}` line to `logs/pipeline-run.json` at the end of every run (even failed ones); `npm run test:plan` prints it too. USD is estimated from `PRICING` in `constants.js` — keep that table current. `page_image` calls minus image pages = QA retries.
 - **QA validation with retry** — after each image generation, gpt-4o-mini vision validates layout/content. Retries up to 2× on fail, then logs warning and continues (fail-open: a flaky validator never blocks the run).
 - **Bounded-concurrency page generation** — `generatePages` honors `PAGE_CONCURRENCY` (default 1 = sequential, preserving the original cost/rate profile). Raise to 2–3 to cut wall-clock; higher values risk OpenAI image rate limits.
 - **Non-essential steps degrade gracefully** — marketing slides are generated in parallel with pages but a failure there is caught and the run continues without them; only essential steps abort the pipeline.
@@ -54,7 +55,7 @@ scripts/                  entry points only
 src/
   run-pipeline.js         orchestrator — runs every step in order
   config/
-    constants.js          MODELS, PAGE_RANGES, RETRY, A4, IMAGE_SIZE
+    constants.js          MODELS, PAGE_RANGES, RETRY, A4, IMAGE_SIZE, PRICING
     tpt-taxonomy.js        TPT_SUBJECT_AREAS, TPT_TAGS (allowed strings)
   llm/
     clients.js            lazy openai() / groq() singletons
@@ -65,6 +66,7 @@ src/
     package-type.js       tier routing (pure + env wrapper)
     concurrency.js        mapWithConcurrency (ordered, bounded)
     svg-templates.js      answer-key page + text marketing slides (SVG → PNG)
+    cost-tracker.js       per-step token usage + USD estimate (logged at run end)
   steps/
     brainstorm.js         gpt-4o: topic + full page plan (exports validate)
     generate-content.js   Groq: Q&A per page (exports validateSchema)

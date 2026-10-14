@@ -3,6 +3,7 @@ import { openai } from '../llm/clients.js'
 import { withRetry } from '../llm/with-retry.js'
 import { MODELS, IMAGE_SIZE } from '../config/constants.js'
 import { mapWithConcurrency } from '../lib/concurrency.js'
+import { recordUsage } from '../lib/cost-tracker.js'
 import { answerKeySvg, renderSvg } from '../lib/svg-templates.js'
 import { validatePage } from './validate-page.js'
 import { reconcilePageContent } from './reconcile-content.js'
@@ -58,6 +59,7 @@ async function generateOnePage(plan, page) {
       size: page.type === 'cover' ? IMAGE_SIZE.cover : IMAGE_SIZE.page,
       quality: page.type === 'cover' ? 'high' : 'medium',
     }), { label: `OpenAI image p${page.pageNum}` })
+    recordUsage(page.type === 'cover' ? 'cover_image' : 'page_image', MODELS.image, response.usage)
 
     if (!response.data?.[0]?.b64_json) throw new Error(`OpenAI image API returned no data for page ${page.pageNum}`)
     buffer = Buffer.from(response.data[0].b64_json, 'base64')

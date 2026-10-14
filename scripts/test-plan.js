@@ -4,6 +4,7 @@ import 'dotenv/config'
 import { brainstorm } from '../src/steps/brainstorm.js'
 import { generateContent, validateAndCorrect } from '../src/steps/generate-content.js'
 import { readTopicHistory } from '../src/steps/topic-history.js'
+import { costSummary } from '../src/lib/cost-tracker.js'
 
 async function main() {
   const packageType = process.env.PACKAGE_TYPE ?? 'small'
@@ -91,6 +92,12 @@ async function main() {
   console.log(`Total questions: ${totalQ}`)
   console.log(`Content log: logs/content-*.json`)
   console.log(`No images generated. No Drive upload. No Telegram. No Supabase write.`)
+
+  const cost = costSummary()
+  console.log(`\n--- ESTIMATED COST: $${cost.totalUsd} ---`)
+  for (const e of cost.byStep) {
+    console.log(`  ${e.step.padEnd(16)} ${e.model.padEnd(24)} calls=${e.calls} in=${e.inputTokens} out=${e.outputTokens} usd=${e.usd ?? '?'}`)
+  }
 }
 
 main().catch(err => {

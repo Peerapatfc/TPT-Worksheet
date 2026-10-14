@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 import { openai } from '../llm/clients.js'
 import { withRetry } from '../llm/with-retry.js'
 import { MODELS, IMAGE_SIZE } from '../config/constants.js'
+import { recordUsage } from '../lib/cost-tracker.js'
 import { whatsIncludedSvg, benefitsSvg, renderSvg } from '../lib/svg-templates.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -37,6 +38,7 @@ async function generateSlide(prompt, quality = 'medium') {
     size: IMAGE_SIZE.slide,
     quality,
   }), { label: 'OpenAI marketing slide' })
+  recordUsage('marketing_image', MODELS.image, response.usage)
   if (!response.data?.[0]?.b64_json) throw new Error('OpenAI image API returned no data')
   return Buffer.from(response.data[0].b64_json, 'base64')
 }

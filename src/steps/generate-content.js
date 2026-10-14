@@ -117,6 +117,7 @@ Call the generate_page_content function with content for all pages.`
       tool: contentTool,
       messages: [{ role: 'user', content: prompt }],
       label: 'Groq content',
+      step: 'content',
     })
   } catch (err) {
     console.warn(`generateContent fetch failed (${err.status ?? err.message})`)
@@ -185,6 +186,7 @@ Call the validate_content function with your assessment.`
       tool: validateTool,
       messages: [{ role: 'user', content: prompt }],
       label: 'Groq validate',
+      step: 'content_recheck',
     })
   } catch (err) {
     console.warn(`validateAndCorrect failed (${err.status ?? err.message}) — using content as-is`)

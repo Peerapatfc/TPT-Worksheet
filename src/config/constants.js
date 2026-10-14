@@ -35,3 +35,17 @@ export const IMAGE_SIZE = {
   page: '1024x1536',
   slide: '1024x1024',
 }
+
+/**
+ * USD per 1M tokens, used only for cost-log estimates (token counts are exact;
+ * dollars are as good as this table). Verify against the providers' pricing
+ * pages and update when they change — gpt-image-2 and Groq figures were taken
+ * from third-party trackers (Oct 2026), not the official pages.
+ * A model missing here is logged with tokens but `usd: null`.
+ */
+export const PRICING = {
+  'gpt-4o': { input: 2.5, output: 10 },
+  'gpt-4o-mini': { input: 0.15, output: 0.6 },
+  'gpt-image-2': { input: 5, output: 30 },
+  'llama-3.3-70b-versatile': { input: 0.59, output: 0.79 },
+}

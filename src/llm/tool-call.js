@@ -1,4 +1,5 @@
 import { withRetry } from './with-retry.js'
+import { recordUsage } from '../lib/cost-tracker.js'
 
 /**
  * Force a single structured tool call and parse its JSON arguments.
@@ -12,10 +13,11 @@ import { withRetry } from './with-retry.js'
  *   tool: object,          // a single OpenAI tool definition ({ type:'function', function:{ name, ... } })
  *   maxTokens?: number,
  *   label?: string,
+ *   step?: string,         // cost-log bucket (defaults to label)
  * }} opts
  * @returns {Promise<{ message: object, toolCall: object|null, args: object|null }>}
  */
-export async function callTool(client, { model, messages, tool, maxTokens, label = 'OpenAI' }) {
+export async function callTool(client, { model, messages, tool, maxTokens, label = 'OpenAI', step = label }) {
   const result = await withRetry(
     () => client.chat.completions.create({
       model,
@@ -26,6 +28,7 @@ export async function callTool(client, { model, messages, tool, maxTokens, label
     }),
     { label },
   )
+  recordUsage(step, model, result.usage)
 
   const message = result.choices[0].message
   const toolCall = message.tool_calls?.[0]
