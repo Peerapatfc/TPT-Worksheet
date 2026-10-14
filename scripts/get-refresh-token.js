@@ -4,19 +4,30 @@
 // Opens a consent URL, catches the redirect on a loopback port (Desktop-app OAuth
 // client), exchanges the code, and prints the refresh token for the
 // GOOGLE_OAUTH_REFRESH_TOKEN secret. Nothing is written to disk.
-import 'dotenv/config'
+import dotenv from 'dotenv'
 import http from 'http'
 import { execFile } from 'child_process'
+import { join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import { google } from 'googleapis'
+
+// Load repo-root .env regardless of the shell's current directory.
+const ENV_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '.env')
+dotenv.config({ path: ENV_PATH, quiet: true })
 
 // Full Drive scope: the pipeline writes into folders you created by hand
 // (GOOGLE_DRIVE_FOLDER_ID / GOOGLE_DRIVE_TPT_FOLDER_ID), which drive.file cannot reach.
 const SCOPES = ['https://www.googleapis.com/auth/drive']
 
-const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID
-const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET
+// Unfilled .env.example values look like "<...>"; treat them as missing.
+const envValue = (name) => {
+  const v = process.env[name]?.trim()
+  return v && !v.startsWith('<') ? v : null
+}
+const clientId = envValue('GOOGLE_OAUTH_CLIENT_ID')
+const clientSecret = envValue('GOOGLE_OAUTH_CLIENT_SECRET')
 if (!clientId || !clientSecret) {
-  console.error('Missing GOOGLE_OAUTH_CLIENT_ID or GOOGLE_OAUTH_CLIENT_SECRET in .env')
+  console.error(`Missing GOOGLE_OAUTH_CLIENT_ID or GOOGLE_OAUTH_CLIENT_SECRET in ${ENV_PATH}`)
   process.exit(1)
 }
 
