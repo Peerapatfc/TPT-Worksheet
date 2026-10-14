@@ -76,6 +76,7 @@ Call the check_worksheet_quality function with your assessment. If all checks pa
       maxTokens: 256,
       tool: qualityTool,
       label: 'OpenAI validate',
+      step: 'validate_page',
       messages: [{
         role: 'user',
         content: [

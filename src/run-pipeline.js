@@ -8,14 +8,25 @@ import { notifyTelegram } from './steps/notify-telegram.js'
 import { readTopicHistory, saveTopicEntry } from './steps/topic-history.js'
 import { appendLog } from './lib/logger.js'
 import { getPackageType } from './lib/package-type.js'
+import { costSummary } from './lib/cost-tracker.js'
 
 /**
  * Full daily pipeline: history → brainstorm → content → images (+ marketing) →
  * PDFs → Drive upload → history save → Telegram notify. Each step appends a
  * structured log line. Marketing slides are non-essential and degrade gracefully;
  * any other step failure aborts the run (and the CI opens a failure issue).
+ * A `cost` log line (estimated API spend per step) is written at the end of
+ * every run, including failed ones, so partial spend is still visible.
  */
 export async function runPipeline() {
+  try {
+    await runSteps()
+  } finally {
+    appendLog({ step: 'cost', ...costSummary() })
+  }
+}
+
+async function runSteps() {
   const runDate = new Date().toISOString().split('T')[0]
   const start = Date.now()
   const packageType = getPackageType()

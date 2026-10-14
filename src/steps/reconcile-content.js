@@ -63,6 +63,7 @@ Call the reconcile_answers function. If no visual data is found in the image, se
       maxTokens: 1024,
       tool: reconcileTool,
       label: 'OpenAI reconcile',
+      step: 'reconcile_page',
       messages: [{
         role: 'user',
         content: [

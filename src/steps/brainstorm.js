@@ -1,5 +1,6 @@
 import { openai } from '../llm/clients.js'
 import { withRetry } from '../llm/with-retry.js'
+import { recordUsage } from '../lib/cost-tracker.js'
 import { MODELS, PAGE_RANGES } from '../config/constants.js'
 import { TPT_SUBJECT_AREAS, TPT_TAGS } from '../config/tpt-taxonomy.js'
 import { worksheetPlanTool } from './schema/worksheet-plan.js'
@@ -158,6 +159,7 @@ Call the generate_worksheet_plan function with the complete plan.`
       tool_choice: { type: 'function', function: { name: 'generate_worksheet_plan' } },
       messages,
     }), { label: 'OpenAI brainstorm' })
+    recordUsage('brainstorm', MODELS.brainstorm, result.usage)
 
     const assistantMsg = result.choices[0].message
     const toolCall = assistantMsg.tool_calls?.[0]
