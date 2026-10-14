@@ -34,13 +34,4 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('Questions to include')
     expect(prompt).toContain('1. How many cats?')
   })
-
-  it('renders an answer-key page with a labeled answer list and no diagrams', () => {
-    const page = { pageNum: 4, type: 'answer_key', sourcePageNums: [2, 3], imagePrompt: 'answers' }
-    const prompt = buildPrompt(basePlan, page)
-    expect(prompt).toContain('Answer Key (Pages 2 & 3)')
-    expect(prompt).toContain('do not redraw any diagrams')
-    expect(prompt).toContain('1. What is 1/2 + 1/2? → 1')
-    expect(prompt).toContain('2. What is 1/4 of 8? → 2')
-  })
 })

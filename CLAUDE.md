@@ -36,6 +36,7 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 - **gpt-image-2 size** — use `1024x1536` (portrait, closer to A4). `1024x1024` leaves large white margins after aspect-ratio fit to A4.
 - **Supabase for history** — GitHub Actions filesystem resets every run; local file won't persist. Drive file also works but Supabase is cleaner.
 - **Dynamic page count** — brainstorm (gpt-4o) decides how many pages within the tier range. Answer-key pages are always grouped at the end.
+- **Template-rendered text pages** — answer keys and the "What's Included" / "Benefits" marketing slides are pure text, so they are rendered locally from SVG templates (`src/lib/svg-templates.js` → sharp PNG) instead of gpt-image-2. No image or vision-QA cost, and answer keys print the exact Q&A data. Answer keys are rendered after all AI pages finish so they reflect reconciled answers. Only the cover, worksheet and activity pages (plus the marketing cover) use gpt-image-2.
 - **QA validation with retry** — after each image generation, gpt-4o-mini vision validates layout/content. Retries up to 2× on fail, then logs warning and continues (fail-open: a flaky validator never blocks the run).
 - **Bounded-concurrency page generation** — `generatePages` honors `PAGE_CONCURRENCY` (default 1 = sequential, preserving the original cost/rate profile). Raise to 2–3 to cut wall-clock; higher values risk OpenAI image rate limits.
 - **Non-essential steps degrade gracefully** — marketing slides are generated in parallel with pages but a failure there is caught and the run continues without them; only essential steps abort the pipeline.
@@ -63,13 +64,14 @@ src/
     slugify.js  source-pages.js  markdown.js  logger.js
     package-type.js       tier routing (pure + env wrapper)
     concurrency.js        mapWithConcurrency (ordered, bounded)
+    svg-templates.js      answer-key page + text marketing slides (SVG → PNG)
   steps/
     brainstorm.js         gpt-4o: topic + full page plan (exports validate)
     generate-content.js   Groq: Q&A per page (exports validateSchema)
-    generate-pages.js     gpt-image-2 + validate + reconcile (exports buildPrompt)
+    generate-pages.js     gpt-image-2 + validate + reconcile; answer keys via template (exports buildPrompt)
     validate-page.js      gpt-4o-mini vision QA
     reconcile-content.js  gpt-4o-mini vision: fix answers vs image
-    generate-marketing-slides.js  gpt-image-2 ×3 + logo composite
+    generate-marketing-slides.js  gpt-image-2 cover + 2 template slides + logo composite
     convert-pdf.js        pdf-lib: per-page + combined + preview PDFs
     upload-drive.js       Drive: folder + PNG/PDF/metadata/listing
     topic-history.js      Supabase read/write

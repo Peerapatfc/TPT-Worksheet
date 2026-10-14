@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url'
 import { openai } from '../llm/clients.js'
 import { withRetry } from '../llm/with-retry.js'
 import { MODELS, IMAGE_SIZE } from '../config/constants.js'
+import { whatsIncludedSvg, benefitsSvg, renderSvg } from '../lib/svg-templates.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // src/steps/generate-marketing-slides.js -> repo-root/logo.png
@@ -57,23 +58,18 @@ export async function generateMarketingSlides(plan) {
 
   const coverPrompt = `Square 1:1 professional marketing cover graphic for a Teachers Pay Teachers educational resource. White or very light background. Large bold centered title text: "${topicName}". Smaller text below: "${plan.gradeLevel} | ${plan.subject}". Bottom banner in color ${color} with white text: "No Prep Printable • Answer Key Included". Colorful child-friendly illustration related to "${plan.subject}" and "${plan.setTitle}" filling upper area. Clean modern educator product design. No worksheet lines, no questions, no writing spaces.`
 
-  const questionsLine = totalQuestions > 0 ? `\n✓ ${totalQuestions}+ Practice Questions` : ''
-  const whatsIncludedPrompt = `Square 1:1 clean marketing slide for Teachers Pay Teachers. White background. Top filled banner in color ${color} with bold white text "WHAT'S INCLUDED". Large centered checklist with colorful checkmarks and readable font:
-✓ ${worksheetPages.length} No-Prep Worksheet & Activity Pages
-✓ ${answerKeyPages.length} Answer Key Page${answerKeyPages.length > 1 ? 's' : ''}
-✓ ${plan.pageCount} Total Pages${questionsLine}
-✓ PDF Format — Print & Go
-✓ Answer Key Included for All Pages
-Professional clean layout. Accent color ${color}. No illustrations, focus on text readability.`
-
-  const alignmentLine = alignmentBadge ? ` Bottom badge: "${alignmentBadge}".` : ''
-  const benefitsPrompt = `Square 1:1 marketing slide for Teachers Pay Teachers. White background. Large bold headline: "NO PREP • PRINT & GO". Medium sub-headline below: "Perfect for:". Grid or list of use cases with small colorful icons: Whole Class • Small Groups • Homework • Morning Work • Sub Plans • Intervention. Bottom colored banner in ${color}.${alignmentLine} Modern professional design. Bold readable fonts.`
-
   console.log('Generating marketing slides...')
+  // Only the cover needs an illustration; the two text slides are template-rendered.
   const [coverRaw, whatsIncludedRaw, benefitsRaw] = await Promise.all([
     generateSlide(coverPrompt, 'medium'),
-    generateSlide(whatsIncludedPrompt, 'low'),
-    generateSlide(benefitsPrompt, 'low'),
+    renderSvg(whatsIncludedSvg({
+      color,
+      worksheetCount: worksheetPages.length,
+      answerKeyCount: answerKeyPages.length,
+      pageCount: plan.pageCount,
+      totalQuestions,
+    })),
+    renderSvg(benefitsSvg({ color, badge: alignmentBadge })),
   ])
 
   const [cover, whatsIncluded, benefits] = await Promise.all([
