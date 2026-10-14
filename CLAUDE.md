@@ -30,9 +30,8 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 - **Forced tool call for structured JSON** — `tool_choice: {type:'function', function:{name:'...'}}` reliably forces structured output. The single-shot pattern is wrapped in `src/llm/tool-call.js` (`callTool`); brainstorm keeps a bespoke multi-turn validation-retry loop. Parse with `JSON.parse(toolCall.function.arguments)`.
 - **Shared retry** — `src/llm/with-retry.js` (`withRetry`) retries 429/500/503 with exponential backoff. One implementation, used by every API call site.
 - **gpt-image-2** — DALL-E 3 was retired March 2026. gpt-image-2 does not accept `response_format` param; always returns b64_json.
-- **Grayscale post-processing** — gpt-image-2 always generates color images. `sharp(buffer).grayscale()` enforces blackline printable output. Grayscale is computed **once per page** and reused for the per-page and combined grayscale PDFs.
-- **Color PNG + Grayscale PDF** — PNGs stay color (TPT listing preview). `sharp().grayscale()` applied only when embedding into PDF (printable B&W). Both uploaded per page.
-- **Combined PDF** — merged all pages into `{slug}-complete-set.pdf`. TPT requires 1 uploadable file per listing; combined PDF serves this. Individual PDFs also uploaded for preview.
+- **Color is the product** — sets are sold in color: `{slug}-complete-set-color.pdf` is the TPT product file. A grayscale `{slug}-complete-set.pdf` (`sharp().grayscale()` per page) is still built and kept in the assets folder as a printer-friendly option.
+- **Combined PDFs only** — TPT needs one uploadable file per listing. Per-page PNG/PDF files are no longer uploaded (nothing used them; ~1.5 min of uploads per run). The assets folder holds the color + grayscale sets, the preview, the 3 marketing slides, `tpt-listing.txt` and `metadata.json`.
 - **gpt-image-2 quality** — worksheet/activity pages use `low` (~$0.006/page vs ~$0.042 at `medium`; text and chart values were as crisp/exact in side-by-side tests). The cover and the marketing cover stay `medium`.
 - **gpt-image-2 size** — use `1024x1536` (portrait, closer to A4). `1024x1024` leaves large white margins after aspect-ratio fit to A4.
 - **Supabase for history** — GitHub Actions filesystem resets every run; local file won't persist. Drive file also works but Supabase is cleaner.
@@ -100,7 +99,7 @@ eval/                     live eval cases (cases.json) + fixture images from rea
 | `OPENAI_API_KEY` | brainstorm, generate-pages, validate-page, reconcile-content, generate-marketing-slides |
 | `GROQ_API_KEY` | generate-content (content + Q&A recheck) |
 | `GOOGLE_DRIVE_FOLDER_ID` | upload-drive (full assets folder) |
-| `GOOGLE_DRIVE_TPT_FOLDER_ID` | upload-drive (flat TPT folder — PDF only, optional) |
+| `GOOGLE_DRIVE_TPT_FOLDER_ID` | upload-drive (TPT folder — color set + preview PDFs in a per-run subfolder, optional) |
 | `GOOGLE_OAUTH_CLIENT_ID` | upload-drive, get-refresh-token |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | upload-drive, get-refresh-token |
 | `GOOGLE_OAUTH_REFRESH_TOKEN` | upload-drive |
@@ -149,7 +148,7 @@ npm start                           # full pipeline run
 - **`GRADE_LEVEL`** — set as GitHub **Variable** (`vars.GRADE_LEVEL`), not Secret. Empty = AI picks any grade K–6.
 - **OAuth2 consent screen** — before running `get-refresh-token.js`, add your Gmail as a test user in Google Cloud Console → OAuth consent screen → Test users. Otherwise get `403 access_denied`.
 - **`FREE_WORKSHEET_DAY` / `LARGE_PACKAGE_DAY`** — set as GitHub **Variables** (not Secrets). `FREE_WORKSHEET_DAY` triggers free tier (7–10 pages, $0). `LARGE_PACKAGE_DAY` triggers large tier (21–`MAX_PAGES_PER_SET` pages). All other days = small tier (15–20 pages). If both fall on the same day, free wins.
-- **`GOOGLE_DRIVE_TPT_FOLDER_ID`** — TPT Drive integration rejects PNGs, JSON, TXT. Use a separate flat folder containing only PDFs. Each run uploads `{slug}-complete-set.pdf` there. Link THIS folder to TPT, not `GOOGLE_DRIVE_FOLDER_ID`.
+- **`GOOGLE_DRIVE_TPT_FOLDER_ID`** — TPT Drive integration rejects PNGs, JSON, TXT. Use a separate folder containing only PDFs. Each run creates a `{date}_{slug}-{id}` subfolder there with `{slug}-complete-set-color.pdf` (product file) and `{slug}-preview.pdf`. Link THIS folder to TPT, not `GOOGLE_DRIVE_FOLDER_ID`.
 - **Preview PDF** — `convert-pdf.js` builds `{slug}-preview.pdf`: cover + first 3 worksheet/activity pages, color, diagonal PREVIEW watermark. Uploaded alongside combined PDFs. Upload this file to TPT "Product Previews" slot manually each listing.
 - **Education standards** — `brainstorm.js` outputs `plan.educationStandards: { framework, codes }`. Math/ELA → CCSS codes, Science → NGSS codes, other → null. Written to `tpt-listing.txt` under "EDUCATION STANDARDS". Copy-paste into TPT "Select CCSS/NGSS" when listing.
 
