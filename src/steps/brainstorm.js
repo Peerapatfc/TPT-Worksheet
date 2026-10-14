@@ -162,6 +162,8 @@ Pick topics that are DIFFERENT from the previously generated list above.
 
 ${step2}
 
+Never plan crossword puzzles, word searches, mazes, or dot-to-dot pages — the image generator cannot draw a consistent grid or path. Use matching, fill-in-the-blank, labeling, sorting, or graphing activities instead.
+
 Step 3: For the tptListing, pick 1–3 subjectAreas from this exact list ONLY (use exact strings):
 ${subjectList}
 
@@ -268,6 +270,9 @@ Call the generate_worksheet_plan function with the complete plan.`
   return plan
 }
 
+// Activities whose grid/path an image model cannot draw consistently.
+const BANNED_ACTIVITY = /\b(crossword|word[\s-]?search|maze|dot[\s-]to[\s-]dot|connect[\s-]the[\s-]dots)\b/i
+
 /**
  * Validate a brainstorm candidate plan against structural and taxonomy rules.
  * Throws on the first hard failure; logs (non-fatal) for filterable issues.
@@ -308,4 +313,7 @@ export function validate(plan, maxPages, packageType) {
   if (validTags.length === 0) throw new Error('No valid tags after filtering')
   if (!plan.tptListing?.teachingDuration)
     throw new Error('Missing tptListing.teachingDuration')
+  const banned = plan.pages.filter(p => BANNED_ACTIVITY.test(`${p.filename ?? ''} ${p.imagePrompt ?? ''}`))
+  if (banned.length > 0)
+    throw new Error(`pages ${banned.map(p => p.pageNum).join(', ')} plan a crossword/word search/maze/dot-to-dot, which the image generator cannot draw correctly — replace them with matching, fill-in-the-blank, labeling, sorting, or graphing activities`)
 }

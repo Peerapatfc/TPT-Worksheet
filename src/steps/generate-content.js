@@ -97,6 +97,8 @@ AVOID visual types that AI cannot render accurately:
 - Analog clocks with exact hand positions
 - Protractors, rulers with exact measurements
 - Geometric shapes requiring precise angles/dimensions
+- Crossword puzzles, word searches, mazes, dot-to-dot (grids and paths cannot be drawn consistently). If a page description asks for one, make it a matching, fill-in-the-blank, or labeling activity on the same content instead.
+imageSpec describes only what is printed on the STUDENT page — never include answers (no "– COB" after a clue, no filled-in blanks, no lines already drawn between matches).
 For pages with NO data visualization (pure text questions, writing prompts): set imageSpec to ""
 
 STEP 2 — Generate Q&A from your imageSpec:
@@ -106,7 +108,7 @@ STEP 2 — Generate Q&A from your imageSpec:
 - All answers must be factually and academically correct.
 - Every question must have exactly ONE correct answer that can be checked against the imageSpec or established facts.
 - Do NOT ask opinion or guessing questions ("Who is likely to…", "What do you think…", "Which is your favorite…").
-- Do NOT ask about details the imageSpec does not define (e.g. who is speaking when the speaker isn't specified).
+- Knowledge questions are fine (e.g. "Which habitat does the wolf spider live in?"). Only avoid questions that ask the student to READ a visual detail the imageSpec does not define (e.g. who is speaking when the speakers aren't specified).
 - Avoid negative questions ("Which direction does X NOT…", "Which is not…") unless exactly one option fits.
 - For open-ended "why/explain" questions, give one concise model answer.
 
@@ -178,9 +180,9 @@ Review every question and answer below. For each item check ALL of:
 2. The answer actually and specifically answers its question — not just correct in isolation
 3. If the page has an imageSpec, the answer must be derivable from the exact data in that imageSpec (e.g. if imageSpec says Bananas=7, answer to "how many bananas?" must be 7)
 4. The question is appropriate in difficulty for ${plan.gradeLevel} level
-5. The question has exactly ONE correct answer. Flag opinion/guessing questions ("who is likely…", "what do you think…"), questions about details the imageSpec doesn't define, and negative questions with several valid answers (e.g. "Which direction does Alex NOT patrol?" when three directions fit).
+5. The question has exactly ONE correct answer. Flag opinion/guessing questions ("who is likely…", "what do you think…"), questions that ask the student to read a visual detail the imageSpec doesn't define, and negative questions with several valid answers (e.g. "Which direction does Alex NOT patrol?" when three directions fit). Knowledge questions whose answer comes from the subject matter rather than the picture are FINE (e.g. a matching page "Which habitat matches the wolf spider?") — do not flag them.
 6. If the answer is wrong, mismatched, or inappropriate, provide correctedAnswer.
-7. If the QUESTION itself fails check 5, rewrite it as correctedQuestion (same topic and difficulty, one verifiable answer) and give its correctedAnswer. Never answer an ambiguous question with "not specified" or "it depends" — rewrite the question instead.
+7. If the QUESTION itself fails check 5, rewrite it as correctedQuestion (same skill, topic and difficulty, one verifiable answer) and give its correctedAnswer. Never answer an ambiguous question with "not specified" or "it depends" — rewrite the question instead. Never rewrite a question into one about layout or position on the page (e.g. "Is X shown at the top of the column?").
 
 ${JSON.stringify(contentData.pages, null, 2)}
 
@@ -231,6 +233,36 @@ Call the validate_content function with your assessment.`
   return { ...contentData, pages: correctedPages }
 }
 
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Remove answers that leaked into an imageSpec, since the image prints the spec
+ * verbatim on the STUDENT page: "= <answer>" after an equation ("1×2 = 2" ->
+ * "1×2") and "– <word answer>" after a clue ("Silk producer – SPIN"). Numeric
+ * answers are only stripped after "=", so data like "Monday – 4 acorns" stays.
+ * Mutates and returns contentData; logs each strip. Pure otherwise — exported
+ * for unit testing.
+ */
+export function stripAnswerLeaks(contentData) {
+  for (const page of contentData?.pages ?? []) {
+    if (!page.imageSpec) continue
+    let spec = page.imageSpec
+    for (const { answer } of page.questions ?? []) {
+      const a = String(answer ?? '').trim()
+      if (!a) continue
+      spec = spec.replace(new RegExp(`\\s*=\\s*${escapeRegExp(a)}(?!\\w|\\.\\d)`, 'g'), '')
+      if (a.length >= 3 && Number.isNaN(Number(a))) {
+        spec = spec.replace(new RegExp(`\\s*[–—-]\\s*${escapeRegExp(a)}(?![\\w])`, 'gi'), '')
+      }
+    }
+    if (spec !== page.imageSpec) {
+      console.warn(`p${page.pageNum}: removed answers from imageSpec`)
+      page.imageSpec = spec
+    }
+  }
+  return contentData
+}
+
 export async function generateContent(plan) {
   const contentPages = plan.pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
   if (contentPages.length === 0) return plan
@@ -249,7 +281,7 @@ export async function generateContent(plan) {
       console.warn('generateContent: schema still invalid after retries — using best available content')
     }
 
-    contentData = await validateAndCorrect(plan, contentData)
+    contentData = stripAnswerLeaks(await validateAndCorrect(plan, contentData))
     break
   }
 

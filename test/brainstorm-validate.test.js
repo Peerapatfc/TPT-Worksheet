@@ -72,3 +72,18 @@ describe('brainstorm validate — structural failures', () => {
     expect(() => validate(makePlan({ teachingDuration: '' }), 30, 'small')).toThrow(/teachingDuration/)
   })
 })
+
+describe('brainstorm validate — banned activities', () => {
+  it.each(['Spider Crossword Puzzle', 'Fall word search', 'Pumpkin patch maze', 'Dot-to-dot owl', 'connect the dots'])('rejects "%s"', (prompt) => {
+    const plan = makePlan()
+    plan.pages[3].imagePrompt = prompt
+    expect(() => validate(plan, 30, 'small')).toThrow(/crossword\/word search\/maze/)
+  })
+
+  it('allows normal activities and words that merely contain the letters', () => {
+    const plan = makePlan()
+    plan.pages[3].imagePrompt = 'Matching activity: amazing animals'
+    plan.pages[4].filename = 'researching_habitats'
+    expect(() => validate(plan, 30, 'small')).not.toThrow()
+  })
+})
