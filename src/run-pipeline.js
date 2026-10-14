@@ -50,9 +50,12 @@ async function runSteps() {
   appendLog({ step: 'brainstorm', status: 'ok', topic: plan.setTitle, pageCount: plan.pageCount, packageType })
 
   const planWithContent = await generateContent(plan)
-  // generateContent fails open (keeps the brainstorm plan) — report that instead of "ok".
+  // generateContent throws if Groq returns nothing; a partial result is reported here.
   const contentPages = planWithContent.pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
   const withContent = contentPages.filter(p => p.content?.questions?.length).length
+  if (withContent < contentPages.length) {
+    addReviewNote('fallback', `${contentPages.length - withContent} of ${contentPages.length} worksheet/activity pages have no questions`)
+  }
   appendLog({
     step: 'generate_content',
     status: withContent === contentPages.length ? 'ok' : 'warn',
