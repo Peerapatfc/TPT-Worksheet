@@ -71,8 +71,10 @@ server.listen(0, '127.0.0.1', () => {
 
       res.end('Done - you can close this tab and return to the terminal.')
       console.log(`Authorized as: ${data.user.emailAddress}`)
-      console.log('\nGOOGLE_OAUTH_REFRESH_TOKEN=' + tokens.refresh_token)
-      console.log('\nPut this value in .env and in the GitHub Actions secret GOOGLE_OAUTH_REFRESH_TOKEN.')
+      // Token alone on its own line so copying it doesn't drag the variable name along.
+      console.log('\nRefresh token (copy only the next line):\n')
+      console.log(tokens.refresh_token)
+      console.log('\nUse it as the value of GOOGLE_OAUTH_REFRESH_TOKEN in .env and in the GitHub Actions secret.')
       server.close()
     } catch (err) {
       res.end('Token exchange failed - see terminal.')
