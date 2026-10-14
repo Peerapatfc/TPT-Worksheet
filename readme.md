@@ -9,7 +9,7 @@ GitHub Actions cron (00:00 UTC)
   → scripts/pipeline.js → src/run-pipeline.js
     → topic-history          (Supabase: load past 60 topics to avoid repeats)
     → brainstorm             (gpt-4o: pick topic + plan N pages + education standards)
-    → generate-content       (Groq llama-3.3-70b: generate + recheck Q&A per page)
+    → generate-content       (Groq gpt-oss-120b: generate + recheck Q&A per page)
     → generate-pages         (gpt-image-2: generate page images, bounded concurrency)
       → validate-page        (gpt-4o-mini vision: QA check, retry up to 2× on fail)
       → reconcile-content    (gpt-4o-mini vision: correct Q&A answers against image)

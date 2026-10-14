@@ -13,8 +13,8 @@ import { costSummary } from './lib/cost-tracker.js'
 /**
  * Full daily pipeline: history → brainstorm → content → images (+ marketing) →
  * PDFs → Drive upload → history save → Telegram notify. Each step appends a
- * structured log line. Marketing slides are non-essential and degrade gracefully;
- * any other step failure aborts the run (and the CI opens a failure issue).
+ * structured log line. Marketing slides and the Telegram notification are
+ * non-essential and degrade gracefully; any other step failure aborts the run (and the CI opens a failure issue).
  * A `cost` log line (estimated API spend per step) is written at the end of
  * every run, including failed ones, so partial spend is still visible.
  */
@@ -49,7 +49,15 @@ async function runSteps() {
   appendLog({ step: 'brainstorm', status: 'ok', topic: plan.setTitle, pageCount: plan.pageCount, packageType })
 
   const planWithContent = await generateContent(plan)
-  appendLog({ step: 'generate_content', status: 'ok' })
+  // generateContent fails open (keeps the brainstorm plan) — report that instead of "ok".
+  const contentPages = planWithContent.pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
+  const withContent = contentPages.filter(p => p.content?.questions?.length).length
+  appendLog({
+    step: 'generate_content',
+    status: withContent === contentPages.length ? 'ok' : 'warn',
+    pagesWithContent: withContent,
+    contentPages: contentPages.length,
+  })
 
   const [pages, marketingSlides] = await Promise.all([
     generatePages(planWithContent),
@@ -77,8 +85,15 @@ async function runSteps() {
   })
   appendLog({ step: 'save_history', status: 'ok' })
 
-  await notifyTelegram(plan, pagesWithPdf[0].buffer, folder.link)
-  appendLog({ step: 'telegram', status: 'ok' })
+  // Non-essential: the set is already uploaded and saved, so a notification
+  // failure (e.g. a network timeout to Telegram) must not fail the run.
+  try {
+    await notifyTelegram(plan, pagesWithPdf[0].buffer, folder.link)
+    appendLog({ step: 'telegram', status: 'ok' })
+  } catch (err) {
+    console.warn(`Telegram notification failed — continuing: ${err.message}`)
+    appendLog({ step: 'telegram', status: 'warn', error: err.cause?.code ?? err.message })
+  }
 
   appendLog({ step: 'done', status: 'ok', durationMs: Date.now() - start })
 }

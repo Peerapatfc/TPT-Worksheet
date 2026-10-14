@@ -7,7 +7,7 @@
  */
 export const MODELS = {
   brainstorm: 'gpt-4o', // OpenAI
-  content: 'llama-3.3-70b-versatile', // Groq
+  content: 'openai/gpt-oss-120b', // Groq (llama-3.3-70b-versatile was retired 2026-08-16)
   validate: 'gpt-4o-mini', // OpenAI vision
   reconcile: 'gpt-4o-mini', // OpenAI vision
   image: 'gpt-image-2', // OpenAI images
@@ -39,13 +39,14 @@ export const IMAGE_SIZE = {
 /**
  * USD per 1M tokens, used only for cost-log estimates (token counts are exact;
  * dollars are as good as this table). Verify against the providers' pricing
- * pages and update when they change — gpt-image-2 and Groq figures were taken
- * from third-party trackers (Oct 2026), not the official pages.
+ * pages and update when they change — gpt-image-2 figures were taken from
+ * third-party trackers (Oct 2026); gpt-oss-120b is Groq's launch price (some
+ * trackers list $0.60 output).
  * A model missing here is logged with tokens but `usd: null`.
  */
 export const PRICING = {
   'gpt-4o': { input: 2.5, output: 10 },
   'gpt-4o-mini': { input: 0.15, output: 0.6 },
   'gpt-image-2': { input: 5, output: 30 },
-  'llama-3.3-70b-versatile': { input: 0.59, output: 0.79 },
+  'openai/gpt-oss-120b': { input: 0.15, output: 0.75 },
 }

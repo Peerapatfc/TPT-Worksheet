@@ -9,7 +9,7 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 | Layer | Tool |
 |-------|------|
 | Brainstorm (topic + plan) | gpt-4o (`openai`) |
-| Content generation + Q&A recheck | llama-3.3-70b-versatile (Groq, OpenAI-compatible) |
+| Content generation + Q&A recheck | openai/gpt-oss-120b (Groq, OpenAI-compatible) |
 | Page QA (vision) + answer reconcile | gpt-4o-mini (`openai`) |
 | Image generation | gpt-image-2 (`openai`) |
 | Image processing | sharp (grayscale post-process) |
@@ -26,7 +26,7 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 
 - **OAuth2 not service account** — personal Google Drive accounts have no service account storage quota. Uses `GOOGLE_OAUTH_REFRESH_TOKEN` instead.
 - **Layered module layout** — library code lives under `src/` (`config/`, `llm/`, `lib/`, `steps/`); `scripts/` holds only thin entry points (`pipeline.js`, `test-plan.js`, `create-issue.js`) plus local-only helpers. CI still invokes `node scripts/pipeline.js`, so entry-point paths are stable.
-- **Two LLM providers** — text brainstorm + vision QA run on OpenAI; Q&A content generation + recheck run on **Groq** (`llama-3.3-70b-versatile`) via the OpenAI-compatible endpoint. Clients are lazy singletons in `src/llm/clients.js` (`openai()`, `groq()`).
+- **Two LLM providers** — text brainstorm + vision QA run on OpenAI; Q&A content generation + recheck run on **Groq** (`openai/gpt-oss-120b`; `llama-3.3-70b-versatile` was retired 2026-08-16) via the OpenAI-compatible endpoint. Clients are lazy singletons in `src/llm/clients.js` (`openai()`, `groq()`).
 - **Forced tool call for structured JSON** — `tool_choice: {type:'function', function:{name:'...'}}` reliably forces structured output. The single-shot pattern is wrapped in `src/llm/tool-call.js` (`callTool`); brainstorm keeps a bespoke multi-turn validation-retry loop. Parse with `JSON.parse(toolCall.function.arguments)`.
 - **Shared retry** — `src/llm/with-retry.js` (`withRetry`) retries 429/500/503 with exponential backoff. One implementation, used by every API call site.
 - **gpt-image-2** — DALL-E 3 was retired March 2026. gpt-image-2 does not accept `response_format` param; always returns b64_json.
@@ -40,7 +40,7 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 - **Cost logging** — every API call records its `usage` into `src/lib/cost-tracker.js` under a step bucket (`brainstorm`, `content`, `content_recheck`, `cover_image`, `page_image`, `validate_page`, `reconcile_page`, `marketing_image`). The pipeline appends one `{"step":"cost",...}` line to `logs/pipeline-run.json` at the end of every run (even failed ones); `npm run test:plan` prints it too. USD is estimated from `PRICING` in `constants.js` — keep that table current. `page_image` calls minus image pages = QA retries.
 - **QA validation with retry** — after each image generation, gpt-4o-mini vision validates layout/content. Retries up to 2× on fail, then logs warning and continues (fail-open: a flaky validator never blocks the run).
 - **Bounded-concurrency page generation** — `generatePages` honors `PAGE_CONCURRENCY` (default 1 = sequential, preserving the original cost/rate profile). Raise to 2–3 to cut wall-clock; higher values risk OpenAI image rate limits.
-- **Non-essential steps degrade gracefully** — marketing slides are generated in parallel with pages but a failure there is caught and the run continues without them; only essential steps abort the pipeline.
+- **Non-essential steps degrade gracefully** — marketing slides are generated in parallel with pages but a failure there is caught and the run continues without them; the Telegram notification runs last and a failure there is logged as `warn`. Only essential steps abort the pipeline. `generate_content` logs `warn` with `pagesWithContent` when Groq content generation fell back to the brainstorm plan.
 - **3-tier package system** — `free` (7–10 pages, $0), `small` (15–20 pages, $2–5), `large` (21–`MAX_PAGES_PER_SET` pages, $5–15). Ranges are defined in `src/config/constants.js` (`PAGE_RANGES`). Day-of-week routing: `FREE_WORKSHEET_DAY` → free, `LARGE_PACKAGE_DAY` → large, all others → small. Free wins ties. All tracked in Supabase history.
 
 ## Project Layout

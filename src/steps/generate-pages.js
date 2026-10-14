@@ -57,7 +57,7 @@ async function generateOnePage(plan, page) {
       model: MODELS.image,
       prompt,
       size: page.type === 'cover' ? IMAGE_SIZE.cover : IMAGE_SIZE.page,
-      quality: page.type === 'cover' ? 'high' : 'medium',
+      quality: 'medium',
     }), { label: `OpenAI image p${page.pageNum}` })
     recordUsage(page.type === 'cover' ? 'cover_image' : 'page_image', MODELS.image, response.usage)
 
