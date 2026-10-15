@@ -2,13 +2,38 @@ import { PDFDocument, rgb, degrees } from 'pdf-lib'
 import sharp from 'sharp'
 import { A4 } from '../config/constants.js'
 
-/** Embed a PNG buffer centered and aspect-fit onto a new A4 page. */
-async function embedToPage(pdfDoc, imgBuffer) {
-  const pngImage = await pdfDoc.embedPng(imgBuffer)
-  const { width: imgW, height: imgH } = pngImage
+// Page images are 1024x1536 PNGs of AI art (a PNG of one is ~1.2 MB, JPEG q90 ~0.25 MB with
+// no visible loss, even zoomed in on text). Embedding JPEGs keeps a 19-page color set around
+// 4 MB instead of ~20 MB, which uploads to Drive/TPT faster and fits the ~10 MB limit of the
+// browser-automation file upload. Pages that are flat text (answer keys, chart pages) don't
+// shrink with JPEG and would only gain artifacts, so those stay PNG.
+export const JPEG_QUALITIES = [90, 85, 80]
+const JPEG_MUST_BE_SMALLER_THAN = 0.7 // of the PNG size
+const PREVIEW_QUALITY = 85
+export const MAX_SET_BYTES = 9 * 1024 * 1024
+
+/**
+ * Encode one page image for embedding: JPEG at `quality` when that is clearly smaller than
+ * the PNG, otherwise keep the PNG. Pure apart from sharp — exported for unit testing.
+ * @returns {Promise<{ format: 'jpg'|'png', data: Buffer }>}
+ */
+export async function encodePage(pngBuffer, quality) {
+  const jpg = await sharp(pngBuffer)
+    .flatten({ background: '#ffffff' })
+    .jpeg({ quality, chromaSubsampling: '4:4:4', mozjpeg: true })
+    .toBuffer()
+  return jpg.length < pngBuffer.length * JPEG_MUST_BE_SMALLER_THAN
+    ? { format: 'jpg', data: jpg }
+    : { format: 'png', data: pngBuffer }
+}
+
+/** Embed an encoded page centered and aspect-fit onto a new A4 page. */
+async function embedToPage(pdfDoc, encoded) {
+  const image = encoded.format === 'jpg' ? await pdfDoc.embedJpg(encoded.data) : await pdfDoc.embedPng(encoded.data)
+  const { width: imgW, height: imgH } = image
   const scale = Math.min(A4.width / imgW, A4.height / imgH)
   const pdfPage = pdfDoc.addPage([A4.width, A4.height])
-  pdfPage.drawImage(pngImage, {
+  pdfPage.drawImage(image, {
     x: (A4.width - imgW * scale) / 2,
     y: (A4.height - imgH * scale) / 2,
     width: imgW * scale,
@@ -18,10 +43,22 @@ async function embedToPage(pdfDoc, imgBuffer) {
 
 const toGrayscale = (buffer) => sharp(buffer).grayscale().png().toBuffer()
 
-async function buildCombinedPdf(buffers) {
-  const pdfDoc = await PDFDocument.create()
-  for (const buf of buffers) await embedToPage(pdfDoc, buf)
-  return Buffer.from(await pdfDoc.save())
+/**
+ * Merge page images into one PDF. Starts at the best JPEG quality and steps down only if the
+ * file is over `maxBytes` (a very long set); warns if even the lowest step is too big.
+ * Exported for unit testing.
+ */
+export async function buildCombinedPdf(buffers, maxBytes = MAX_SET_BYTES) {
+  let pdf
+  for (const quality of JPEG_QUALITIES) {
+    const encoded = await Promise.all(buffers.map(b => encodePage(b, quality)))
+    const pdfDoc = await PDFDocument.create()
+    for (const e of encoded) await embedToPage(pdfDoc, e)
+    pdf = Buffer.from(await pdfDoc.save())
+    if (pdf.length <= maxBytes) return pdf
+  }
+  console.warn(`PDF is ${(pdf.length / 1e6).toFixed(1)} MB even at JPEG quality ${JPEG_QUALITIES.at(-1)} (limit ${(maxBytes / 1e6).toFixed(1)} MB)`)
+  return pdf
 }
 
 async function buildPreviewPdf(pages) {
@@ -35,7 +72,7 @@ async function buildPreviewPdf(pages) {
   const font = await pdfDoc.embedFont('Helvetica-Bold')
 
   for (const page of previewPages) {
-    await embedToPage(pdfDoc, page.buffer)
+    await embedToPage(pdfDoc, await encodePage(page.buffer, PREVIEW_QUALITY))
     const pdfPage = pdfDoc.getPages().at(-1)
     const { width, height } = pdfPage.getSize()
     pdfPage.drawText('PREVIEW', {

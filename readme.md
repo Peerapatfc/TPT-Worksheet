@@ -18,7 +18,7 @@ GitHub Actions cron (00:00 UTC; GitHub often starts it hours late)
         picture graph / bar graph / table → drawn by code (src/lib/chart-page.js), no image model
         answer keys → rendered from the Q&A data (SVG), no image model
     → generate-marketing-slides (gpt-image-2 cover + 2 template slides; non-essential)
-    → convert-pdf            (pdf-lib: grayscale set, color set, watermarked preview)
+    → convert-pdf            (pdf-lib: grayscale set, color set, watermarked preview; JPEG-embedded, ~4 MB per set)
     → upload-drive           (Google Drive OAuth2: assets folder + TPT folder)
     → topic-history          (Supabase: save topic)
     → notify-telegram        (cover photo + caption, then a plain-text review summary)
