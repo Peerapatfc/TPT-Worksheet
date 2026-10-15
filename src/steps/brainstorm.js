@@ -47,6 +47,12 @@ const STANDARDS_PATTERNS = {
   NGSS: /\b(NGSS|Next Generation Science Standards)\b/i,
 }
 
+// "Aligned to common education standards" / "standards aligned" names no framework,
+// so plan.educationStandards codes can never back it — drop it. Sentences that do
+// name CCSS/NGSS are judged by STANDARDS_PATTERNS instead.
+const VAGUE_STANDARDS = /\b(aligned|alignment|correlated)\s+(to|with)\b[^.!?]*\bstandards?\b|\bstandards?[\s-]aligned\b/i
+const ANY_FRAMEWORK = /\b(CCSS|Common[\s-]Core|NGSS|Next Generation Science Standards)\b/i
+
 /**
  * Remove CCSS/NGSS alignment claims the plan can't back up. A framework may only
  * be mentioned if plan.educationStandards names it with at least one code — the
@@ -59,7 +65,7 @@ export function sanitizeStandardsClaims(plan) {
   if (!listing) return plan
   const backed = plan.educationStandards?.codes?.length ? plan.educationStandards.framework : null
   const unbacked = Object.entries(STANDARDS_PATTERNS).filter(([fw]) => fw !== backed).map(([, re]) => re)
-  const claims = (text) => unbacked.some(re => re.test(text ?? ''))
+  const claims = (text) => unbacked.some(re => re.test(text ?? '')) || (VAGUE_STANDARDS.test(text ?? '') && !ANY_FRAMEWORK.test(text ?? ''))
 
   if (claims(listing.description)) {
     listing.description = listing.description
@@ -76,6 +82,24 @@ export function sanitizeStandardsClaims(plan) {
       .trim()
   }
   if (Array.isArray(listing.keywords)) listing.keywords = listing.keywords.filter(k => !claims(k))
+  return plan
+}
+
+/**
+ * Make the numbers in the listing description match the plan. The model writes
+ * the description before the pages are final (it once wrote "This 16-page set
+ * includes 10 worksheets" for an 18-page, 11-worksheet set), so overwrite any
+ * "N-page" / "N pages" and "N [no-prep] worksheets/activity pages" with the real
+ * counts. Mutates and returns the plan. Pure (no IO) — exported for unit testing.
+ */
+export function syncListingCounts(plan) {
+  const listing = plan?.tptListing
+  if (!listing?.description || !Array.isArray(plan.pages)) return plan
+  const total = plan.pages.length
+  const content = plan.pages.filter(p => p.type === 'worksheet' || p.type === 'activity').length
+  listing.description = listing.description
+    .replace(/\b\d+([-\s])(pages?)\b/gi, (_, sep, word) => `${total}${sep}${word}`)
+    .replace(/\b\d+(\s+(?:no[-\s]prep\s+)?(?:worksheets?|activit(?:y|ies)|worksheet\s*(?:\/|and|&)\s*activity\s+pages?))/gi, (_, rest) => `${content}${rest}`)
   return plan
 }
 
@@ -176,6 +200,7 @@ Step 5: Estimate teachingDuration in minutes (e.g. "30 minutes", "45-60 minutes"
 Step 6: Pick a themeColor — one hex color code (e.g. "#1B4F8A", "#2E7D32", "#6A1B9A") that matches the topic's mood. Must be a dark, saturated color suitable for a professional worksheet border and header bar. This exact hex will be used on EVERY page of this set.
 
 Step 7: For each worksheet/activity page, write an imagePrompt describing the activity (its skill and layout). Do NOT write the questions — they are generated in a later step.
+For the cover page's imagePrompt, name the specific subjects to illustrate: when the set is about particular people, characters, animals or objects, list EACH ONE by name (with one identifying detail) and say to show no others — never write "a group of historical figures" or similar, or the image model will draw whoever it likes. The people/things named on the cover must be exactly the ones the worksheet pages cover.
 
 Step 8: For educationStandards, pick 2–5 specific standard codes that this resource FULLY covers:
 - Math or ELA subject → framework: "CCSS", codes using exact format:
@@ -257,6 +282,7 @@ Call the generate_worksheet_plan function with the complete plan.`
   for (const p of plan.pages) p.filename = p.filename.replace(/\.(png|pdf|jpe?g)$/i, '')
 
   sanitizeStandardsClaims(plan)
+  syncListingCounts(plan)
 
   plan.tptListing.subjectAreas = plan.tptListing.subjectAreas.filter(a => TPT_SUBJECT_AREAS.includes(a))
   plan.tptListing.tags = plan.tptListing.tags.filter(t => TPT_TAGS.includes(t))
@@ -298,7 +324,7 @@ export function validate(plan, maxPages, packageType) {
   const invalidAreas = areas.filter(a => !TPT_SUBJECT_AREAS.includes(a))
   if (invalidAreas.length > 0) console.warn(`Filtering invalid subjectAreas: ${invalidAreas.join(', ')}`)
   const validAreas = areas.filter(a => TPT_SUBJECT_AREAS.includes(a))
-  if (validAreas.length === 0) throw new Error('No valid subjectAreas after filtering')
+  if (validAreas.length === 0) throw new Error(`No valid subjectAreas after filtering — category headers such as "Math" or "Science" are not selectable on TPT; pick a specific topic (e.g. "Arithmetic", "Biology")`)
   const tags = plan.tptListing?.tags
   if (!Array.isArray(tags) || tags.length < 1)
     throw new Error('tptListing.tags must have at least 1 item')

@@ -5,6 +5,7 @@ import { callTool } from '../llm/tool-call.js'
 import { MODELS } from '../config/constants.js'
 import { slugify } from '../lib/slugify.js'
 import { addReviewNote } from '../lib/review-notes.js'
+import { quotesMissingFromSpec } from '../lib/spec-consistency.js'
 
 const contentTool = {
   type: 'function',
@@ -67,6 +68,19 @@ const validateTool = {
             required: ['pageNum', 'questionNum', 'correctedAnswer', 'reason'],
           },
         },
+        imageSpecCorrections: {
+          type: 'array',
+          description: 'Full replacement imageSpec for a page whose rewritten questions or answers depend on something the picture prints (a quote, label, name or number). Omit when no page needs one.',
+          items: {
+            type: 'object',
+            properties: {
+              pageNum: { type: 'integer' },
+              correctedImageSpec: { type: 'string', description: 'The COMPLETE corrected imageSpec for the page, not a diff' },
+              reason: { type: 'string' },
+            },
+            required: ['pageNum', 'correctedImageSpec', 'reason'],
+          },
+        },
       },
       required: ['pass', 'corrections'],
     },
@@ -92,7 +106,8 @@ If the page needs a data visualization, define ALL values precisely so an AI ima
 - Bar charts: list every bar label and exact height value
 - Data tables: list every cell value
 - Number sequences / patterns: list every term explicitly
-- Matching activities (draw-a-line): list left column items top-to-bottom, then list right column items in a SHUFFLED order (NOT the same order as left column) so correct answers require diagonal or non-straight lines. Specify both columns explicitly: "Left (top to bottom): A, B, C, D. Right (top to bottom, shuffled): C, A, D, B."
+- Matching activities (draw-a-line): list left column items top-to-bottom, then list right column items in a SHUFFLED order (NOT the same order as left column) so correct answers require diagonal or non-straight lines. Specify both columns explicitly: "Left (top to bottom): A, B, C, D. Right (top to bottom, shuffled): C, A, D, B." Every left item MUST have its correct match among the right items — never list a quote, term or picture whose answer is not in the other column.
+- Quotations: only use a quotation if you are certain of the speaker, and only attribute it to someone in the activity. Questions may only quote text that the imageSpec prints.
 AVOID visual types that AI cannot render accurately:
 - Base-10 blocks with subdivisions (use text "3 tens 2 ones" format instead)
 - Analog clocks with exact hand positions
@@ -194,6 +209,8 @@ Review every question and answer below. For each item check ALL of:
 5. The question has exactly ONE correct answer. Flag opinion/guessing questions ("who is likely…", "what do you think…"), questions that ask the student to read a visual detail the imageSpec doesn't define, and negative questions with several valid answers (e.g. "Which direction does Alex NOT patrol?" when three directions fit). Knowledge questions whose answer comes from the subject matter rather than the picture are FINE (e.g. a matching page "Which habitat matches the wolf spider?") — do not flag them.
 6. If the answer is wrong, mismatched, or inappropriate, provide correctedAnswer.
 7. If the QUESTION itself fails check 5, rewrite it as correctedQuestion (same skill, topic and difficulty, one verifiable answer) and give its correctedAnswer. Never answer an ambiguous question with "not specified" or "it depends" — rewrite the question instead. Never rewrite a question into one about layout or position on the page (e.g. "Is X shown at the top of the column?").
+8. The picture is drawn from each page's imageSpec and printed on the student page, so a question may only quote or name what the imageSpec prints. If you rewrite a question or change an answer so that it depends on a quote, label, name or number that the imageSpec does not contain, ALSO return the page's complete corrected imageSpec in imageSpecCorrections. On matching pages every left-column item must have its correct match in the right column (e.g. if a quote's speaker is not among the listed figures, replace the quote in the imageSpec and the question together).
+9. Check the attribution of every quotation. If you are not certain who said it, replace it with a well-documented quotation by one of the listed figures (and update the imageSpec to match).
 
 ${JSON.stringify(contentData.pages, null, 2)}
 
@@ -218,38 +235,75 @@ Call the validate_content function with your assessment.`
   }
 
   if (!res.args) return contentData
-  const validation = res.args
+  return applyRecheck(contentData, res.args)
+}
 
-  // Apply any corrections even if the model also said pass:true.
-  if (!validation.corrections?.length) return contentData
+/**
+ * Apply the recheck's corrections to the generated content. Corrections are
+ * applied even if the model also said pass:true. A rewrite that quotes text the
+ * page's imageSpec doesn't print is reverted unless the recheck also supplied a
+ * corrected imageSpec — otherwise the picture and the questions disagree.
+ * Pure apart from console/review-note logging — exported for unit testing.
+ */
+export function applyRecheck(contentData, validation) {
+  const corrections = validation?.corrections ?? []
+  const specFixes = new Map((validation?.imageSpecCorrections ?? []).map(f => [f.pageNum, f]))
+  if (!corrections.length && !specFixes.size) return contentData
 
-  console.log(`Content accuracy: ${validation.corrections.length} correction(s) applied`)
+  console.log(`Content accuracy: ${corrections.length} correction(s) applied`)
 
-  const correctionMap = new Map(
-    validation.corrections.map(c => [`${c.pageNum}-${c.questionNum}`, c])
-  )
+  const correctionMap = new Map(corrections.map(c => [`${c.pageNum}-${c.questionNum}`, c]))
 
-  const correctedPages = contentData.pages.map(page => ({
-    ...page,
-    questions: page.questions.map(q => {
-      const fix = correctionMap.get(`${page.pageNum}-${q.num}`)
-      if (fix?.correctedQuestion && isLayoutQuestion(fix.correctedQuestion)) {
-        console.warn(`  p${page.pageNum} q${q.num}: ignored layout-only rewrite "${fix.correctedQuestion}" — keeping the original question`)
-        return q
-      }
-      if (fix) {
+  const correctedPages = contentData.pages.map(page => {
+    const specFix = specFixes.get(page.pageNum)
+    const candidateSpec = specFix?.correctedImageSpec?.trim() ? specFix.correctedImageSpec : page.imageSpec
+
+    // Apply the question corrections against a given spec; pure so it can be redone.
+    const build = (imageSpec) => {
+      const notes = []
+      const questions = page.questions.map(q => {
+        const fix = correctionMap.get(`${page.pageNum}-${q.num}`)
+        if (!fix) return q
+        if (fix.correctedQuestion && isLayoutQuestion(fix.correctedQuestion)) {
+          console.warn(`  p${page.pageNum} q${q.num}: ignored layout-only rewrite "${fix.correctedQuestion}" — keeping the original question`)
+          return q
+        }
+        const rewritten = { ...q, question: fix.correctedQuestion || q.question, answer: fix.correctedAnswer }
+        if (fix.correctedQuestion && quotesMissingFromSpec(imageSpec, [rewritten]).length) {
+          console.warn(`  p${page.pageNum} q${q.num}: rewrite quotes text the image spec lacks — keeping the original question`)
+          notes.push(['spec_mismatch', `p${page.pageNum} q${q.num}: the recheck's rewrite cites a quote the picture would not show, so the original was kept — check this question's answer: "${q.question}"`])
+          return q
+        }
         if (fix.correctedQuestion) console.log(`  p${page.pageNum} q${q.num} question: "${q.question}" → "${fix.correctedQuestion}"`)
         console.log(`  p${page.pageNum} q${q.num}: "${q.answer}" → "${fix.correctedAnswer}" (${fix.reason})`)
         if (fix.correctedQuestion) {
-          addReviewNote('question_rewritten', `p${page.pageNum} q${q.num}: "${q.question}" → "${fix.correctedQuestion}" (answer: ${fix.correctedAnswer})`)
+          notes.push(['question_rewritten', `p${page.pageNum} q${q.num}: "${q.question}" → "${fix.correctedQuestion}" (answer: ${fix.correctedAnswer})`])
         } else if (fix.correctedAnswer !== q.answer) {
-          addReviewNote('answer_corrected', `p${page.pageNum} q${q.num} "${q.question}": ${q.answer} → ${fix.correctedAnswer}`)
+          notes.push(['answer_corrected', `p${page.pageNum} q${q.num} "${q.question}": ${q.answer} → ${fix.correctedAnswer}`])
         }
-        return { ...q, question: fix.correctedQuestion || q.question, answer: fix.correctedAnswer }
-      }
-      return q
-    }),
-  }))
+        return rewritten
+      })
+      return { questions, notes }
+    }
+
+    let imageSpec = candidateSpec
+    let built = build(imageSpec)
+    // A corrected spec that drops a quote some question still cites leaves the page
+    // inconsistent — fall back to the original spec and the questions that fit it.
+    if (imageSpec !== page.imageSpec && quotesMissingFromSpec(imageSpec, built.questions).length) {
+      console.warn(`  p${page.pageNum}: corrected imageSpec drops a quote a question still cites — keeping the original imageSpec`)
+      addReviewNote('spec_mismatch', `p${page.pageNum}: the recheck's image spec change left a question citing a quote the picture would not show, so the original image spec was kept — verify this page`)
+      imageSpec = page.imageSpec
+      built = build(imageSpec)
+    }
+    if (imageSpec !== page.imageSpec) {
+      console.log(`  p${page.pageNum} imageSpec updated (${specFix.reason})`)
+      addReviewNote('image_spec_updated', `p${page.pageNum}: image spec rewritten to match corrected questions (${specFix.reason})`)
+    }
+    built.notes.forEach(([kind, message]) => addReviewNote(kind, message))
+
+    return { ...page, imageSpec, questions: built.questions }
+  })
 
   return { ...contentData, pages: correctedPages }
 }

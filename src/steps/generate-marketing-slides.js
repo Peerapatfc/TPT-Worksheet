@@ -43,6 +43,21 @@ async function generateSlide(prompt, quality = 'medium') {
   return Buffer.from(response.data[0].b64_json, 'base64')
 }
 
+/**
+ * Prompt for the square marketing cover. The illustration must show the same
+ * subjects as the set's own cover page — left to the title alone, the model
+ * invented unrelated people for a "Historical Figures" set.
+ * Pure (no IO) — exported for unit testing.
+ */
+export function buildMarketingCoverPrompt(plan) {
+  const topicName = plan.tptListing.title.split('|')[0].trim()
+  const coverPage = plan.pages.find(p => p.type === 'cover')
+  const subjects = coverPage?.imagePrompt
+    ? ` The illustration must show the same subjects as the set's cover page and nothing else: ${coverPage.imagePrompt}`
+    : ''
+  return `Square 1:1 professional marketing cover graphic for a Teachers Pay Teachers educational resource. White or very light background. Large bold centered title text: "${topicName}". Smaller text below: "${plan.gradeLevel} | ${plan.subject}". Bottom banner in color ${plan.themeColor} with white text: "No Prep Printable • Answer Key Included". Colorful child-friendly illustration related to "${plan.subject}" and "${plan.setTitle}" filling upper area.${subjects} Clean modern educator product design. No worksheet lines, no questions, no writing spaces.`
+}
+
 export async function generateMarketingSlides(plan) {
   const worksheetPages = plan.pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
   const answerKeyPages = plan.pages.filter(p => p.type === 'answer_key')
@@ -55,10 +70,9 @@ export async function generateMarketingSlides(plan) {
   const isELA = ELA_SUBJECTS.some(s => plan.tptListing?.subjectAreas?.includes(s))
   const alignmentBadge = isELA ? 'SOR Aligned' : standardsBadge
 
-  const topicName = plan.tptListing.title.split('|')[0].trim()
   const color = plan.themeColor
 
-  const coverPrompt = `Square 1:1 professional marketing cover graphic for a Teachers Pay Teachers educational resource. White or very light background. Large bold centered title text: "${topicName}". Smaller text below: "${plan.gradeLevel} | ${plan.subject}". Bottom banner in color ${color} with white text: "No Prep Printable • Answer Key Included". Colorful child-friendly illustration related to "${plan.subject}" and "${plan.setTitle}" filling upper area. Clean modern educator product design. No worksheet lines, no questions, no writing spaces.`
+  const coverPrompt = buildMarketingCoverPrompt(plan)
 
   console.log('Generating marketing slides...')
   // Only the cover needs an illustration; the two text slides are template-rendered.

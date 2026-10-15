@@ -1,12 +1,15 @@
 // TPT taxonomy — the exact, allowed strings for subject areas and tags.
 // These mirror Teachers Pay Teachers' selectable leaf nodes; the brainstorm step
 // constrains the LLM to these values and filters anything off-list afterward.
+// Category headers (Art, English Language Arts, Math, Performing Arts, Science,
+// Social Emotional, Social Studies, World Languages) are NOT selectable on the
+// listing form, so they are deliberately absent.
 
 export const TPT_SUBJECT_AREAS = [
   // Art
-  'Art', 'Art History', 'Coloring Pages', 'Graphic Arts', 'Visual Arts', 'Other (Arts)',
+  'Art History', 'Coloring Pages', 'Graphic Arts', 'Visual Arts', 'Other (Arts)',
   // English Language Arts
-  'English Language Arts', 'Alphabet', 'Balanced Literacy', 'Close Reading', 'Creative Writing', 'ELA Test Prep',
+  'Alphabet', 'Balanced Literacy', 'Close Reading', 'Creative Writing', 'ELA Test Prep',
   'Grammar', 'Handwriting', 'Informational Text', 'Library Skills', 'Literature',
   'Novel Studies', 'Phonics & Phonological Awareness', 'Poetry', 'Reading',
   'Reading Strategies', 'Science of Reading', 'Short Stories', 'Sight Words',
@@ -14,25 +17,25 @@ export const TPT_SUBJECT_AREAS = [
   // Health
   'Health',
   // Math
-  'Math', 'Algebra', 'Algebra 2', 'Applied Math', 'Arithmetic', 'Basic Operations', 'Calculus',
+  'Algebra', 'Algebra 2', 'Applied Math', 'Arithmetic', 'Basic Operations', 'Calculus',
   'Decimals', 'Financial Literacy', 'Fractions', 'Geometry', 'Graphing', 'Math Test Prep',
   'Measurement', 'Mental Math', 'Money Math', 'Numbers', 'Order of Operations',
   'Place Value', 'PreCalculus', 'Statistics', 'Telling Time', 'Other (Math)',
   // Performing Arts
-  'Performing Arts', 'Dance', 'Drama', 'Instrumental Music', 'Music', 'Music Composition', 'Vocal Music',
+  'Dance', 'Drama', 'Instrumental Music', 'Music', 'Music Composition', 'Vocal Music',
   'Other (Performing Arts)',
   // Physical Education
   'Physical Education',
   // Science
-  'Science', 'Anatomy', 'Archaeology', 'Astronomy', 'Basic Principles', 'Biology', 'Chemistry',
+  'Anatomy', 'Archaeology', 'Astronomy', 'Basic Principles', 'Biology', 'Chemistry',
   'Computer Science - Technology', 'Earth Sciences', 'Engineering', 'Environment',
   'Family Consumer Sciences', 'Forensics', 'General Science', 'Instructional Technology',
   'Marine Science', 'Physical Science', 'Physics', 'Robotics', 'Other (Science)',
   // Social Emotional
-  'Social Emotional', 'Character Education', 'Classroom Community', 'School Counseling', 'School Psychology',
+  'Character Education', 'Classroom Community', 'School Counseling', 'School Psychology',
   'Social Emotional Learning',
   // Social Studies
-  'Social Studies', 'AAPI History', 'African History', 'Ancient History', 'Asian Studies', 'Australian History',
+  'AAPI History', 'African History', 'Ancient History', 'Asian Studies', 'Australian History',
   'Black History', 'British History', 'Business', 'Canadian History', 'Civics',
   'Criminal Justice - Law', 'Economics', 'Elections - Voting', 'European History',
   'Geography', 'Government', 'Latino and Hispanic Studies', 'Middle Ages', 'Native Americans',
@@ -40,7 +43,7 @@ export const TPT_SUBJECT_AREAS = [
   // Speaking & Listening
   'Speaking & Listening',
   // World Languages
-  'World Languages', 'American Sign Language', 'Arabic', 'Chinese', 'French', 'Gaeilge', 'German', 'Hebrew',
+  'American Sign Language', 'Arabic', 'Chinese', 'French', 'Gaeilge', 'German', 'Hebrew',
   'Italian', 'Japanese', 'Latin', 'Portuguese', 'Russian', 'Spanish', 'Other (World Language)',
   // Cross-subject
   'For All Subjects', 'Not Subject Specific',
