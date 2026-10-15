@@ -16,6 +16,8 @@ import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { validatePage } from '../src/steps/validate-page.js'
 import { validateAndCorrect, isLayoutQuestion } from '../src/steps/generate-content.js'
+import { quotesMissingFromSpec } from '../src/lib/spec-consistency.js'
+import { reviewNotes, resetReviewNotes } from '../src/lib/review-notes.js'
 import { costSummary } from '../src/lib/cost-tracker.js'
 
 const EVAL_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'eval')
@@ -50,7 +52,11 @@ async function runRecheck() {
     const misses = new Set()
     for (let r = 0; r < RUNS; r++) {
       const input = structuredClone({ pages: c.pages })
+      resetReviewNotes()
       const out = await validateAndCorrect(c.plan, input)
+      // A failed recheck returns the content untouched, which would otherwise look
+      // like a pass for every "must not change" expectation.
+      const fellBack = reviewNotes().some(n => n.kind === 'fallback')
       const before = new Map(c.pages.flatMap(p => p.questions.map(q => [`${p.pageNum}-${q.num}`, q.question])))
       const after = new Map(out.pages.flatMap(p => p.questions.map(q => [`${p.pageNum}-${q.num}`, q.question])))
       const changed = key => before.get(key) !== after.get(key)
@@ -58,8 +64,14 @@ async function runRecheck() {
       // Rewording a knowledge question is allowed; turning it into a question
       // about page layout ("listed second on the right side") is not.
       const runMisses = [
+        ...(fellBack ? ['recheck call failed — content returned unchecked'] : []),
         ...c.expectNotLayout.filter(k => changed(k) && isLayoutQuestion(after.get(k))).map(k => `${k} became a layout question: "${after.get(k)}"`),
         ...c.expectRewritten.filter(k => !changed(k)).map(k => `${k} kept (should be rewritten)`),
+        // The picture is drawn from imageSpec, so a quote the questions ask about must be in it.
+        ...(c.expectQuotesInSpec ?? []).flatMap(pn => {
+          const page = out.pages.find(p => p.pageNum === pn)
+          return quotesMissingFromSpec(page?.imageSpec, page?.questions).map(m => `p${pn} asks about a quote the image spec lacks: "${m}"`)
+        }),
       ]
       runMisses.forEach(m => misses.add(m))
       if (runMisses.length === 0) correctRuns++

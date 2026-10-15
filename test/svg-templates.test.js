@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { answerKeySvg, whatsIncludedSvg, benefitsSvg, wrapText, escapeXml, safeColor } from '../src/lib/svg-templates.js'
+import { answerKeySvg, whatsIncludedSvg, benefitsSvg, fitFontSize, wrapText, escapeXml, safeColor } from '../src/lib/svg-templates.js'
 
 const plan = {
   setTitle: 'Fractions & Fun',
@@ -60,5 +60,25 @@ describe('helpers', () => {
     expect(escapeXml(`<a & "b">`)).toBe('&lt;a &amp; &quot;b&quot;&gt;')
     expect(safeColor('red')).toBe('#1B4F8A')
     expect(safeColor('#abcdef')).toBe('#abcdef')
+  })
+})
+
+describe('fitFontSize', () => {
+  it('keeps the base size when every line fits', () => {
+    expect(fitFontSize(['18 Total Pages'], 774, 38)).toBe(38)
+  })
+
+  it('shrinks until the longest line fits, never below the minimum', () => {
+    const long = '11 No-Prep Worksheet & Activity Pages'
+    const size = fitFontSize([long, '6 Answer Key Pages'], 774, 38)
+    expect(size).toBeLessThan(38)
+    expect(long.length * size * 0.66).toBeLessThanOrEqual(774)
+    expect(fitFontSize(['x'.repeat(200)], 774, 38, 24)).toBe(24)
+  })
+
+  it('whatsIncludedSvg uses the fitted size so the long first row does not overflow', () => {
+    const svg = whatsIncludedSvg({ color: '#4B5320', worksheetCount: 11, answerKeyCount: 6, pageCount: 18, totalQuestions: 55 })
+    const sizes = [...svg.matchAll(/font-size="(\d+)"/g)].map(m => Number(m[1]))
+    expect(sizes).not.toContain(38)
   })
 })

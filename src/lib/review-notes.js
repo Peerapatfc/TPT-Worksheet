@@ -4,7 +4,7 @@
 // notification and logged at the end of the run.
 const notes = []
 
-/** @param {'qa_failed'|'question_rewritten'|'answer_corrected'|'answer_leak'|'fallback'} kind */
+/** @param {'qa_failed'|'question_rewritten'|'answer_corrected'|'answer_leak'|'fallback'|'image_spec_updated'|'spec_mismatch'} kind */
 export function addReviewNote(kind, message) {
   notes.push({ kind, message })
 }
@@ -20,9 +20,11 @@ export function resetReviewNotes() {
 
 const SECTIONS = [
   ['qa_failed', '⚠️ Pages that failed QA after all retries — check these first'],
+  ['spec_mismatch', '⚠️ Recheck rewrites reverted — the picture would not match; verify these answers'],
   ['fallback', '⚠️ Steps that fell back'],
   ['question_rewritten', '✏️ Questions rewritten by the recheck'],
   ['answer_corrected', '✏️ Answers corrected by the recheck'],
+  ['image_spec_updated', '🖼️ Image specs rewritten to match corrected questions'],
   ['answer_leak', '🧹 Answers removed from image specs'],
 ]
 

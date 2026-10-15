@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { validate, largestEvenN } from '../src/steps/brainstorm.js'
 
 // Build a structurally-valid plan: 1 cover + N worksheets + ceil(N/2) answer keys.
-function makePlan({ worksheets = 10, answerKeys, subjectAreas = ['Math'], tags = ['Worksheets', 'Printables'], teachingDuration = '30 minutes' } = {}) {
+function makePlan({ worksheets = 10, answerKeys, subjectAreas = ['Arithmetic'], tags = ['Worksheets', 'Printables'], teachingDuration = '30 minutes' } = {}) {
   const pages = [{ pageNum: 1, type: 'cover' }]
   for (let i = 0; i < worksheets; i++) pages.push({ pageNum: i + 2, type: 'worksheet' })
   const ak = answerKeys ?? Math.ceil(worksheets / 2)
@@ -85,5 +85,16 @@ describe('brainstorm validate — banned activities', () => {
     plan.pages[3].imagePrompt = 'Matching activity: amazing animals'
     plan.pages[4].filename = 'researching_habitats'
     expect(() => validate(plan, 30, 'small')).not.toThrow()
+  })
+})
+
+describe('validate subject areas', () => {
+  it('rejects a plan whose only subject area is a non-selectable category header', () => {
+    expect(() => validate(makePlan({ subjectAreas: ['Math'] }), 30, 'small')).toThrow(/category headers/)
+    expect(() => validate(makePlan({ subjectAreas: ['Science'] }), 30, 'small')).toThrow(/category headers/)
+  })
+
+  it('accepts leaf subject areas, ignoring a header listed beside them', () => {
+    expect(() => validate(makePlan({ subjectAreas: ['Social Studies', 'U.S. History'] }), 30, 'small')).not.toThrow()
   })
 })

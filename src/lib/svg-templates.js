@@ -132,6 +132,18 @@ ${body}
 </svg>`
 }
 
+// Average glyph width of DejaVu Sans Bold in em — the font the CI renderer falls back to.
+const BOLD_EM = 0.66
+
+/**
+ * Largest font size (≤ base, ≥ min) at which the longest line still fits maxWidth.
+ * Pure — exported for unit testing.
+ */
+export function fitFontSize(lines, maxWidth, base, min = 24) {
+  const longest = Math.max(1, ...lines.map(l => String(l).length))
+  return Math.max(min, Math.min(base, Math.floor(maxWidth / (longest * BOLD_EM))))
+}
+
 /** "What's Included" marketing slide SVG (1024×1024). Pure. */
 export function whatsIncludedSvg({ color, worksheetCount, answerKeyCount, pageCount, totalQuestions }) {
   const c = safeColor(color)
@@ -145,9 +157,11 @@ export function whatsIncludedSvg({ color, worksheetCount, answerKeyCount, pageCo
   ]
   const gap = 118
   const startY = 320 + (6 - items.length) * gap / 2
+  const textX = 190
+  const size = fitFontSize(items, SLIDE - textX - 50, 38)
   const rows = items.map((item, i) => {
     const y = startY + i * gap
-    return checkmark(130, y - 12, 30, c) + text(190, y, item, { size: 38, weight: 'bold', fill: '#222' })
+    return checkmark(130, y - 12, 30, c) + text(textX, y, item, { size, weight: 'bold', fill: '#222' })
   }).join('')
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${SLIDE}" height="${SLIDE}" viewBox="0 0 ${SLIDE} ${SLIDE}">
 <rect width="100%" height="100%" fill="#fff"/>

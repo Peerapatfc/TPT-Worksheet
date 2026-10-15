@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeAnswerKeys, sanitizeStandardsClaims, validate } from '../src/steps/brainstorm.js'
+import { normalizeAnswerKeys, sanitizeStandardsClaims, syncListingCounts, validate } from '../src/steps/brainstorm.js'
 
 const page = (pageNum, type, extra = {}) => ({ pageNum, type, filename: `${type}_${pageNum}`, imagePrompt: type, ...extra })
 
@@ -32,7 +32,7 @@ describe('normalizeAnswerKeys', () => {
     pages.push(page(12, 'answer_key'))
     const plan = normalizeAnswerKeys({
       setTitle: 'T', pages,
-      tptListing: { title: 'T | Grade 3', subjectAreas: ['Math'], tags: ['Worksheets'], teachingDuration: '30 minutes' },
+      tptListing: { title: 'T | Grade 3', subjectAreas: ['Arithmetic'], tags: ['Worksheets'], teachingDuration: '30 minutes' },
     })
     expect(() => validate(plan, 30, 'small')).not.toThrow()
   })
@@ -69,5 +69,45 @@ describe('sanitizeStandardsClaims', () => {
   it('treats a framework with no codes as unbacked', () => {
     const plan = sanitizeStandardsClaims({ educationStandards: { framework: 'CCSS', codes: [] }, tptListing: listing() })
     expect(plan.tptListing.description).not.toMatch(/Common Core/)
+  })
+})
+
+describe('syncListingCounts', () => {
+  const planWith = (description) => ({
+    pages: [{ type: 'cover' }, ...Array(11).fill({ type: 'worksheet' }), ...Array(6).fill({ type: 'answer_key' })],
+    tptListing: { description },
+  })
+
+  it('overwrites a wrong page count and worksheet count with the real ones', () => {
+    const plan = syncListingCounts(planWith('This 16-page set includes 10 no-prep worksheets and activities plus answer keys.'))
+    expect(plan.tptListing.description).toBe('This 18-page set includes 11 no-prep worksheets and activities plus answer keys.')
+  })
+
+  it('keeps singular/plural wording and leaves unrelated numbers alone', () => {
+    const plan = syncListingCounts(planWith('A 20 page packet with 9 worksheet/activity pages and 50 questions for 3 centers.'))
+    expect(plan.tptListing.description).toBe('A 18 page packet with 11 worksheet/activity pages and 50 questions for 3 centers.')
+  })
+
+  it('does nothing without a description', () => {
+    expect(syncListingCounts({ pages: [], tptListing: {} })).toEqual({ pages: [], tptListing: {} })
+  })
+})
+
+describe('sanitizeStandardsClaims — vague claims', () => {
+  const run = (educationStandards, description, keywords = []) => {
+    const plan = { educationStandards, tptListing: { title: 'T | Grade 4', description, keywords } }
+    return sanitizeStandardsClaims(plan).tptListing
+  }
+
+  it('drops "aligned to common education standards" and "standards aligned" when no framework is named', () => {
+    const listing = run({ framework: null, codes: [] }, 'Great packet. Aligned to common education standards. Print and go.', ['education standards aligned', 'print and go'])
+    expect(listing.description).toBe('Great packet. Print and go.')
+    expect(listing.keywords).toEqual(['print and go'])
+  })
+
+  it('keeps a backed CCSS sentence', () => {
+    const listing = run({ framework: 'CCSS', codes: ['CCSS.MATH.CONTENT.4.NBT.B.4'] }, 'Great packet. Aligned to Common Core State Standards (CCSS). Print and go.', ['common core math'])
+    expect(listing.description).toContain('Aligned to Common Core State Standards (CCSS).')
+    expect(listing.keywords).toEqual(['common core math'])
   })
 })
