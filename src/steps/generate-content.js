@@ -6,6 +6,7 @@ import { MODELS } from '../config/constants.js'
 import { slugify } from '../lib/slugify.js'
 import { addReviewNote } from '../lib/review-notes.js'
 import { quotesMissingFromSpec } from '../lib/spec-consistency.js'
+import { validateChart, CHART_TYPES, CHART_ICONS, CHART_LIMITS } from '../lib/chart-page.js'
 
 const contentTool = {
   type: 'function',
@@ -22,7 +23,28 @@ const contentTool = {
             properties: {
               pageNum: { type: 'integer' },
               title: { type: 'string' },
-              imageSpec: { type: 'string', description: 'Exact visual data spec, or empty string if no visualization' },
+              imageSpec: { type: 'string', description: 'Exact visual data spec, or empty string if no visualization (always empty when chart is set)' },
+              chart: {
+                type: 'object',
+                description: 'ONLY for a picture graph, bar graph, or simple category/number table. Drawn exactly by code — omit for every other page.',
+                properties: {
+                  type: { type: 'string', enum: CHART_TYPES },
+                  title: { type: 'string' },
+                  icon: { type: 'string', enum: CHART_ICONS, description: 'pictograph only' },
+                  unit: { type: 'string', description: 'singular noun one icon/unit stands for, e.g. "acorn"' },
+                  labelHeader: { type: 'string', description: 'table only: first column header' },
+                  valueHeader: { type: 'string', description: 'table only: second column header' },
+                  categories: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: { label: { type: 'string' }, value: { type: 'integer' } },
+                      required: ['label', 'value'],
+                    },
+                  },
+                },
+                required: ['type', 'title', 'categories'],
+              },
               questions: {
                 type: 'array',
                 items: {
@@ -102,9 +124,7 @@ For each worksheet/activity page, follow TWO steps in order:
 
 STEP 1 — Define imageSpec (exact visual blueprint):
 If the page needs a data visualization, define ALL values precisely so an AI image generator can draw it exactly:
-- Picture graphs: "Draw EXACTLY N [icon] icons for [category]" for every category
-- Bar charts: list every bar label and exact height value
-- Data tables: list every cell value
+- Picture graphs, bar graphs, and simple category/number tables: do NOT describe them in imageSpec. Fill "chart" instead — code draws it exactly, so the answer key always matches. Whole numbers only; picture graph ≤${CHART_LIMITS.pictograph.maxCategories} categories and ≤${CHART_LIMITS.pictograph.maxValue} per category (one icon = 1 unit), bar graph ≤${CHART_LIMITS.bar.maxCategories} bars with values ≤${CHART_LIMITS.bar.maxValue}, table ≤${CHART_LIMITS.table.maxCategories} rows. Leave imageSpec "" on chart pages. Every question on a chart page must be answerable by reading the chart.
 - Number sequences / patterns: list every term explicitly
 - Matching activities (draw-a-line): list left column items top-to-bottom, then list right column items in a SHUFFLED order (NOT the same order as left column) so correct answers require diagonal or non-straight lines. Specify both columns explicitly: "Left (top to bottom): A, B, C, D. Right (top to bottom, shuffled): C, A, D, B." Every left item MUST have its correct match among the right items — never list a quote, term or picture whose answer is not in the other column.
 - Quotations: only use a quotation if you are certain of the speaker, and only attribute it to someone in the activity. Questions may only quote text that the imageSpec prints.
@@ -181,6 +201,9 @@ export function validateSchema(contentData, contentPages, packageType = 'small')
       if (!q.question?.trim()) issues.push(`page ${page.pageNum} q${q.num} empty question`)
       if (!q.answer?.trim()) issues.push(`page ${page.pageNum} q${q.num} empty answer`)
     }
+    if (content.chart) {
+      for (const issue of validateChart(content.chart)) issues.push(`page ${page.pageNum} ${issue}`)
+    }
   }
 
   return issues
@@ -204,7 +227,7 @@ Set: "${plan.setTitle}" | Grade: ${plan.gradeLevel} | Subject: ${plan.subject}
 Review every question and answer below. For each item check ALL of:
 1. The answer is academically correct (math calculations, spelling, grammar, facts, logic)
 2. The answer actually and specifically answers its question — not just correct in isolation
-3. If the question asks the student to READ data from the picture (counts, chart/table values, labels), its answer must match the exact data in the imageSpec (e.g. if imageSpec says Bananas=7, "how many bananas?" must be 7). Questions answered from subject knowledge — e.g. a matching page asking which habitat a spider lives in — do NOT need to be derivable from the imageSpec; only check that the answer is correct.
+3. If the question asks the student to READ data from the picture (counts, chart/table values, labels), its answer must match the exact data in the page's chart (categories/values) or imageSpec (e.g. if the chart says Bananas=7, "how many bananas?" must be 7). Questions answered from subject knowledge — e.g. a matching page asking which habitat a spider lives in — do NOT need to be derivable from the imageSpec; only check that the answer is correct.
 4. The question is appropriate in difficulty for ${plan.gradeLevel} level
 5. The question has exactly ONE correct answer. Flag opinion/guessing questions ("who is likely…", "what do you think…"), questions that ask the student to read a visual detail the imageSpec doesn't define, and negative questions with several valid answers (e.g. "Which direction does Alex NOT patrol?" when three directions fit). Knowledge questions whose answer comes from the subject matter rather than the picture are FINE (e.g. a matching page "Which habitat matches the wolf spider?") — do not flag them.
 6. If the answer is wrong, mismatched, or inappropriate, provide correctedAnswer.

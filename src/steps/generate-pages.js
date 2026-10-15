@@ -6,6 +6,7 @@ import { mapWithConcurrency } from '../lib/concurrency.js'
 import { recordUsage } from '../lib/cost-tracker.js'
 import { addReviewNote } from '../lib/review-notes.js'
 import { answerKeySvg, renderSvg } from '../lib/svg-templates.js'
+import { chartPageSvg, validateChart } from '../lib/chart-page.js'
 import { validatePage } from './validate-page.js'
 import { reconcilePageContent } from './reconcile-content.js'
 
@@ -34,13 +35,22 @@ const TYPE_STYLE = {
  * an SVG template — no image/QA cost — and only after every other page is done, so
  * they reflect reconciled answers. Output order matches plan.pages.
  */
+/** Chart pages (valid structured chart) are drawn by code, not gpt-image-2. Pure. */
+export const isChartPage = (page) =>
+  (page.type === 'worksheet' || page.type === 'activity') && !!page.content?.chart && validateChart(page.content.chart).length === 0
+
 export async function generatePages(plan) {
   const concurrency = parseInt(process.env.PAGE_CONCURRENCY ?? '1', 10) || 1
-  const aiPages = plan.pages.filter(p => p.type !== 'answer_key')
+  const aiPages = plan.pages.filter(p => p.type !== 'answer_key' && !isChartPage(p))
   const generated = await mapWithConcurrency(aiPages, concurrency, page => generateOnePage(plan, page))
 
   let next = 0
   return Promise.all(plan.pages.map(async page => {
+    if (isChartPage(page)) {
+      const buffer = await renderSvg(chartPageSvg(plan, page))
+      console.log(`Rendered chart page ${page.pageNum}/${plan.pageCount}: ${page.filename} (${page.content.chart.type})`)
+      return { ...page, buffer }
+    }
     if (page.type !== 'answer_key') return generated[next++]
     const buffer = await renderSvg(answerKeySvg(plan, page))
     console.log(`Rendered answer key page ${page.pageNum}/${plan.pageCount}: ${page.filename}`)
