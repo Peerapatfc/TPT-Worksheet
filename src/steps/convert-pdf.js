@@ -18,12 +18,6 @@ async function embedToPage(pdfDoc, imgBuffer) {
 
 const toGrayscale = (buffer) => sharp(buffer).grayscale().png().toBuffer()
 
-async function singlePagePdf(imgBuffer) {
-  const pdfDoc = await PDFDocument.create()
-  await embedToPage(pdfDoc, imgBuffer)
-  return Buffer.from(await pdfDoc.save())
-}
-
 async function buildCombinedPdf(buffers) {
   const pdfDoc = await PDFDocument.create()
   for (const buf of buffers) await embedToPage(pdfDoc, buf)
@@ -59,20 +53,14 @@ async function buildPreviewPdf(pages) {
 }
 
 /**
- * Convert generated page images into the full set of PDFs:
- *   - one grayscale PDF per page (printable)
- *   - a combined grayscale PDF (TPT upload)
- *   - a combined color PDF
- *   - a watermarked color preview PDF
- *
- * Grayscale conversion is computed once per page and reused across the per-page
- * and combined grayscale PDFs.
+ * Convert generated page images into the set's PDFs:
+ *   - a combined color PDF (the product file sold on TPT)
+ *   - a combined grayscale PDF (kept in the assets folder as a printer-friendly option)
+ *   - a watermarked color preview PDF (TPT "Product Previews" slot)
+ * No per-page PDFs — nothing used them.
  */
 export async function convertPdfs(pages) {
   const grayBuffers = await Promise.all(pages.map(p => toGrayscale(p.buffer)))
-
-  const perPagePdfs = await Promise.all(grayBuffers.map(singlePagePdf))
-  const pagesWithPdf = pages.map((page, i) => ({ ...page, pdfBuffer: perPagePdfs[i] }))
 
   const [combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer] = await Promise.all([
     buildCombinedPdf(grayBuffers),
@@ -80,5 +68,5 @@ export async function convertPdfs(pages) {
     buildPreviewPdf(pages),
   ])
 
-  return { pagesWithPdf, combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer }
+  return { combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer }
 }

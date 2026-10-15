@@ -74,10 +74,10 @@ async function runSteps() {
   ])
   appendLog({ step: 'generate_images', status: 'ok', generated: pages.length, marketingSlides: marketingSlides.length })
 
-  const { pagesWithPdf, combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer } = await convertPdfs(pages)
+  const { combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer } = await convertPdfs(pages)
   appendLog({ step: 'convert_pdf', status: 'ok' })
 
-  const folder = await uploadDrive(plan, pagesWithPdf, combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer, runDate, marketingSlides)
+  const folder = await uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedPdfBuffer, previewPdfBuffer, runDate, marketingSlides)
   appendLog({ step: 'upload_drive', status: 'ok', folderLink: folder.link })
 
   await saveTopicEntry({
@@ -96,7 +96,7 @@ async function runSteps() {
   appendLog({ step: 'review', count: notes.length, notes })
   const reviewText = buildReviewMessage(plan.setTitle, notes, costSummary().totalUsd)
   try {
-    await notifyTelegram(plan, pagesWithPdf[0].buffer, folder.link, reviewText)
+    await notifyTelegram(plan, pages[0].buffer, folder.link, reviewText)
     appendLog({ step: 'telegram', status: 'ok' })
   } catch (err) {
     console.warn(`Telegram notification failed — continuing: ${err.message}`)

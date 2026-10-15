@@ -66,14 +66,8 @@ export async function uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedP
 
   const folder = await createFolder(drive, folderName, parentId)
   const folderId = folder.id
-  const fileIds = {}
-
-  for (const page of pages) {
-    const pngFile = await uploadBuffer(drive, page.buffer, `${page.filename}.png`, 'image/png', folderId)
-    const pdfFile = await uploadBuffer(drive, page.pdfBuffer, `${page.filename}.pdf`, 'application/pdf', folderId)
-    fileIds[page.filename] = { png: pngFile.id, pdf: pdfFile.id }
-    console.log(`Uploaded ${page.filename} (PNG + PDF)`)
-  }
+  // Per-page PNG/PDF files are no longer uploaded — only the combined PDFs,
+  // preview, marketing slides, listing text and metadata are used.
 
   for (const slide of marketingSlides) {
     await uploadBuffer(drive, slide.buffer, `${slide.filename}.png`, 'image/png', folderId)
@@ -91,7 +85,6 @@ export async function uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedP
       filename: p.filename,
       type: p.type,
       sha256: createHash('sha256').update(p.buffer).digest('hex'),
-      driveIds: fileIds[p.filename],
     })),
     tptListing: plan.tptListing,
     driveFolder: folder.webViewLink,
@@ -158,15 +151,16 @@ export async function uploadDrive(plan, pages, combinedPdfBuffer, colorCombinedP
   ])
   console.log(`Uploaded combined PDFs (grayscale + color + preview)`)
 
+  // The TPT folder gets only what is listed: the color set (product file) and
+  // the preview. The grayscale set stays in the assets folder above.
   const tptRootId = process.env.GOOGLE_DRIVE_TPT_FOLDER_ID
   if (tptRootId) {
     const tptSubfolder = await createFolder(drive, folderName, tptRootId)
     await Promise.all([
-      uploadBuffer(drive, combinedPdfBuffer, combinedFilename, 'application/pdf', tptSubfolder.id),
       uploadBuffer(drive, colorCombinedPdfBuffer, colorCombinedFilename, 'application/pdf', tptSubfolder.id),
       uploadBuffer(drive, previewPdfBuffer, previewFilename, 'application/pdf', tptSubfolder.id),
     ])
-    console.log(`Uploaded combined PDFs to TPT subfolder: ${folderName}`)
+    console.log(`Uploaded color set + preview PDFs to TPT subfolder: ${folderName}`)
   }
 
   return { link: folder.webViewLink, folderId }
