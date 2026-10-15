@@ -136,6 +136,18 @@ create table topic_history (
 );
 ```
 
+## Changing LLM Prompts or QA Logic
+
+**Run `npm run eval` before and after any change** to a prompt, tool schema, or pass/fail logic in `brainstorm.js`, `generate-content.js` (content + recheck), `validate-page.js`, or `reconcile-content.js`. Spot-checking a single case is not enough — it has missed regressions here before (a recheck rule that looked fine on one page rewrote a whole matching page in 4/5 eval runs).
+
+1. `npm run eval` on the current code to get a baseline (all cases should be ✓ or ○ known gap).
+2. Make the change.
+3. `EVAL_RUNS=5 npm run eval` — every case must stay ✓; investigate any new "flaky" line.
+4. When a real run ships a new failure (a wrong page, a bad rewrite), add it to `eval/cases.json` with its fixture image (downscaled to a 640px short side, JPEG) **before** fixing it, confirm it fails, then fix.
+5. Mention the eval result in the PR.
+
+The eval calls live models (~$0.11 at 3 runs, ~$0.18 at 5) and needs `OPENAI_API_KEY` + `GROQ_API_KEY` in `.env`; it is not part of `npm test` or CI.
+
 ## Local Testing
 
 ```bash
