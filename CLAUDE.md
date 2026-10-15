@@ -171,12 +171,6 @@ npm start                           # full pipeline run
 - **Preview PDF** — `convert-pdf.js` builds `{slug}-preview.pdf`: cover + first 3 worksheet/activity pages, color, diagonal PREVIEW watermark. Uploaded alongside combined PDFs. Upload this file to TPT "Product Previews" slot manually each listing.
 - **Education standards** — `brainstorm.js` outputs `plan.educationStandards: { framework, codes }`. Math/ELA → CCSS codes, Science → NGSS codes, other → null. Written to `tpt-listing.txt` under "EDUCATION STANDARDS". Copy-paste into TPT "Select CCSS/NGSS" when listing.
 
-## TPT Listing — Static Field Answers
+## TPT Listing
 
-These never change run-to-run; always fill them the same way:
-
-| Field | Value |
-|-------|-------|
-| Format | `PDF` + `Image` |
-| Tax Code | `Digital books sold to an end user with rights for permanent use` |
-| Subject Area | Leaf nodes only — category headers (Art, English Language Arts, Math, Science, Social Studies, etc.) are NOT selectable; pick e.g. Arithmetic, Biology, U.S. History |
+How to create or fix a TPT product from a set — static answers (format, tax code, subject-area rules), per-field mapping from `tpt-listing.txt`, upload limits and form quirks — lives in **[docs/tpt-listing.md](docs/tpt-listing.md)**. Keep it as the single place for that; do not repeat the field table here.

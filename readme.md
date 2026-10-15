@@ -54,15 +54,9 @@ Day-of-week routing controls package size:
 | `small` | 15–20 | $2–5 | all other days |
 | `large` | 21–`MAX_PAGES_PER_SET` | $5–15 | `LARGE_PACKAGE_DAY` |
 
-## TPT Listing — Static Fields
+## TPT Listing
 
-| Field | Value |
-|-------|-------|
-| Format | `PDF` + `Image` |
-| Tax Code | `Digital books sold to an end user with rights for permanent use` |
-| Product Previews | Upload `{slug}-preview.pdf` from Drive |
-| Education Standards | See `tpt-listing.txt` → "EDUCATION STANDARDS" section (CCSS for Math/ELA, NGSS for Science) |
-| Subject Area | Leaf nodes only — category headers (Art, English Language Arts, Math, Science, Social Studies, etc.) are not selectable |
+See [docs/tpt-listing.md](docs/tpt-listing.md) for the static field answers (format, tax code, subject-area rules), how each `tpt-listing.txt` field maps onto the form, and upload limits/quirks.
 
 ## Setup
 
