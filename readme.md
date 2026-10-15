@@ -1,41 +1,48 @@
 # TPT Worksheet Generator
 
-Daily pipeline: generates one printable worksheet SET per day (OpenAI gpt-4o + gpt-image-2, Groq Llama for Q&A), uploads to Google Drive, notifies Telegram. Runs via GitHub Actions cron.
+Daily pipeline: generates one printable worksheet SET per day (OpenAI gpt-4o for planning, Groq gpt-oss-120b for questions/answers, gpt-image-2 for page art), uploads it to Google Drive, and posts the cover plus a review summary to Telegram. Runs via GitHub Actions cron. About $0.30 of API spend per set.
 
 ## How It Works
 
 ```
-GitHub Actions cron (00:00 UTC)
+GitHub Actions cron (00:00 UTC; GitHub often starts it hours late)
+  → npm test               (gate: fail before spending any API budget)
   → scripts/pipeline.js → src/run-pipeline.js
-    → topic-history          (Supabase: load past 60 topics to avoid repeats)
-    → brainstorm             (gpt-4o: pick topic + plan N pages + education standards)
-    → generate-content       (Groq gpt-oss-120b: generate + recheck Q&A per page)
-    → generate-pages         (gpt-image-2: generate page images, bounded concurrency)
-      → validate-page        (gpt-4o-mini vision: QA check, retry up to 2× on fail)
-      → reconcile-content    (gpt-4o-mini vision: correct Q&A answers against image)
-    → generate-marketing-slides (gpt-image-2 ×3, non-essential — degrades gracefully)
-    → convert-pdf            (pdf-lib: PNG → grayscale PDF + combined + preview PDF)
-    → upload-drive           (Google Drive OAuth2: folder + all files)
-    → topic-history          (Supabase: save topic to history)
-    → notify-telegram        (Telegram: cover photo + MarkdownV2 caption)
+    → topic-history          (Supabase: load past topics to avoid repeats)
+    → brainstorm             (gpt-4o: topic, page plan, listing text, standards — no questions)
+    → generate-content       (Groq gpt-oss-120b: questions + answers + imageSpec per page, then a recheck;
+                              charts come back as structured data)
+    → generate-pages         (per page, in parallel with the marketing slides:)
+        cover / worksheet / activity → gpt-image-2, then validate-page (gpt-4o-mini vision QA, up to 2 retries)
+                                        and reconcile-content (fix answers that depend on the drawn picture)
+        picture graph / bar graph / table → drawn by code (src/lib/chart-page.js), no image model
+        answer keys → rendered from the Q&A data (SVG), no image model
+    → generate-marketing-slides (gpt-image-2 cover + 2 template slides; non-essential)
+    → convert-pdf            (pdf-lib: grayscale set, color set, watermarked preview)
+    → upload-drive           (Google Drive OAuth2: assets folder + TPT folder)
+    → topic-history          (Supabase: save topic)
+    → notify-telegram        (cover photo + caption, then a plain-text review summary)
 ```
 
-Library code lives under `src/` (`config/`, `llm/`, `lib/`, `steps/`); `scripts/` holds only entry points. See [CLAUDE.md](CLAUDE.md) for the full layout.
+Library code lives under `src/` (`config/`, `llm/`, `lib/`, `steps/`); `scripts/` holds only entry points and local helpers. See [CLAUDE.md](CLAUDE.md) for the full layout and the design decisions behind each step.
 
-Each run produces one set folder in Google Drive:
+Each run produces one set folder in the Google Drive assets folder (`GOOGLE_DRIVE_FOLDER_ID`):
 ```
 2026-05-04_fractions-grade-3-abc12345/
-├── page_1_cover.png / .pdf
-├── page_2_worksheet.png / .pdf
-├── page_N_answer_key.png / .pdf
-├── {slug}-complete-set.pdf        ← grayscale, all pages merged (upload to TPT)
-├── {slug}-complete-set-color.pdf  ← color version
+├── {slug}-complete-set.pdf        ← grayscale, all pages merged (printer-friendly)
+├── {slug}-complete-set-color.pdf  ← color, all pages merged (the file sold on TPT)
 ├── {slug}-preview.pdf             ← color, cover + 3 sample pages, PREVIEW watermark
-├── metadata.json
+├── marketing-cover.png            ← listing thumbnails
+├── marketing-whats-included.png
+├── marketing-benefits.png
+├── metadata.json                  ← set facts, per-page hashes, listing fields
 └── tpt-listing.txt                ← paste-ready title, description, keywords, price, education standards
 ```
 
-The TPT subfolder (`GOOGLE_DRIVE_TPT_FOLDER_ID`) receives only the 3 PDFs above — no PNGs/JSON/TXT (TPT Drive integration rejects those).
+There are no per-page PNG/PDF files. To look at individual pages, extract them from a PDF:
+`node scripts/extract-pdf-pages.js <complete-set-color.pdf> <out-dir> --sheets`.
+
+The TPT subfolder (`GOOGLE_DRIVE_TPT_FOLDER_ID`) receives only the color set and the preview PDF — no PNGs/JSON/TXT (the TPT Drive integration rejects those).
 
 ## Package Tiers
 
@@ -55,7 +62,7 @@ Day-of-week routing controls package size:
 | Tax Code | `Digital books sold to an end user with rights for permanent use` |
 | Product Previews | Upload `{slug}-preview.pdf` from Drive |
 | Education Standards | See `tpt-listing.txt` → "EDUCATION STANDARDS" section (CCSS for Math/ELA, NGSS for Science) |
-| Subject Area | Leaf nodes only — headers (Art, English Language Arts, etc.) are not selectable |
+| Subject Area | Leaf nodes only — category headers (Art, English Language Arts, Math, Science, Social Studies, etc.) are not selectable |
 
 ## Setup
 
@@ -103,7 +110,7 @@ create table topic_history (
 | Secret | How to get |
 |--------|-----------|
 | `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
-| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) — used for Q&A content generation |
+| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) — used for Q&A generation and the recheck |
 | `GOOGLE_DRIVE_FOLDER_ID` | Open assets Drive folder → copy ID from URL |
 | `GOOGLE_DRIVE_TPT_FOLDER_ID` | Open TPT-only Drive folder → copy ID from URL |
 | `GOOGLE_OAUTH_CLIENT_ID` | Google Cloud Console → Credentials |
@@ -113,6 +120,7 @@ create table topic_history (
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Settings → API → service_role key |
 | `TELEGRAM_BOT_TOKEN` | See Telegram Setup below |
 | `TELEGRAM_CHANNEL_ID` | See Telegram Setup below |
+| `TELEGRAM_REVIEW_CHAT_ID` | _(optional)_ Chat that receives the review summary; defaults to the channel |
 
 **Variables** — Settings → Variables → Actions:
 
@@ -141,6 +149,7 @@ cp .env.example .env   # fill in all values
 npm install
 npm test               # unit tests (pure logic, no API keys needed)
 npm run test:plan      # dry-run: brainstorm + content only (no images/Drive/Telegram)
+npm run eval           # live LLM regression eval (~$0.11) — run before changing a prompt or QA rule
 npm start              # full pipeline run
 ```
 
@@ -151,9 +160,10 @@ surface (tier routing, plan validation, slugify, MarkdownV2 caption, prompt buil
 answer-key resolution, bounded concurrency). No API keys or network required — it also runs
 in CI on every push/PR (`.github/workflows/test.yml`) and as a gate before the daily pipeline.
 
+`npm run eval` is separate: it calls the real models against saved failure cases (`eval/cases.json`) and is not part of CI. See "Changing LLM Prompts or QA Logic" in CLAUDE.md.
+
 ## Logs
 
-Each run writes `logs/pipeline-run.json` (one JSON object per line).
-GitHub Actions uploads logs as artifact for 30 days.
+Each run writes `logs/pipeline-run.json` (one JSON object per line, including a `review` line with things a human should check and a `cost` line with estimated API spend per step) and `logs/content-*.json` (the final questions/answers). GitHub Actions uploads logs as an artifact for 30 days.
 
 On failure, a GitHub Issue is automatically opened and assigned to `peerapatfc`.
