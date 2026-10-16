@@ -188,6 +188,8 @@ ${step2}
 
 Never plan crossword puzzles, word searches, mazes, or dot-to-dot pages — the image generator cannot draw a consistent grid or path. Use matching, fill-in-the-blank, labeling, sorting, or graphing activities instead.
 
+Every page must have answers a teacher can check in an answer key. Do not plan pages that depend on what the student draws, collects, observes or writes about their own life (draw-your-own, collages, nature walks, "write a story about…") — plan labeling, matching, sorting, fill-in or short-answer pages with one correct answer. Keep vocabulary at the set's grade level (word banks and labels must use words that grade can read), and do not plan matching pictures of look-alike items (e.g. different leaf species) that the image generator cannot draw reliably.
+
 Step 3: For the tptListing, pick 1–3 subjectAreas from this exact list ONLY (use exact strings):
 ${subjectList}
 

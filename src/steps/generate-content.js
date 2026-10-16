@@ -148,6 +148,9 @@ STEP 2 — Generate Q&A from your imageSpec:
 - Knowledge questions are fine (e.g. "Which habitat does the wolf spider live in?"). Only avoid questions that ask the student to READ a visual detail the imageSpec does not define (e.g. who is speaking when the speakers aren't specified).
 - Avoid negative questions ("Which direction does X NOT…", "Which is not…") unless exactly one option fits.
 - For open-ended "why/explain" questions, give one concise model answer.
+- Never ask about the student's own drawing, collection, collage, story, observations or experience ("your leaf", "Draw a leaf you saw", "Did you include…", "Write a sentence about your…"). The answer key must hold ONE concrete correct answer for every question, so a page may not depend on what a student draws, collects or writes. Ask knowledge or picture-reading questions instead.
+- Use only words a ${plan.gradeLevel} student can read and understand. Avoid technical terms (e.g. photosynthesis, glucose, by-product, chlorophyll) unless the page itself defines them in the imageSpec; prefer everyday wording.
+- Picture matching (pictures on one side, names on the other): every picture must be unmistakably different from the others in shape and colour, and a student must be able to tell which name belongs to it. Do not match look-alike items that only an expert can tell apart (e.g. different leaf species by outline) — the image generator cannot draw those reliably.
 
 Pages:
 ${pageDescriptions}
@@ -165,7 +168,7 @@ Call the generate_page_content function with content for all pages.`
       step: 'content',
     })
   } catch (err) {
-    console.warn(`generateContent fetch failed (${err.status ?? err.message})`)
+    console.warn(`generateContent fetch failed (${err.status ?? err.message}${err.status ? ` ${JSON.stringify(err.error ?? '').slice(0, 300)}` : ''})`)
     return null
   }
 
@@ -201,6 +204,7 @@ export function validateSchema(contentData, contentPages, packageType = 'small')
     for (const q of content.questions) {
       if (!q.question?.trim()) issues.push(`page ${page.pageNum} q${q.num} empty question`)
       if (!q.answer?.trim()) issues.push(`page ${page.pageNum} q${q.num} empty answer`)
+      if (isOpenEndedQuestion(q.question)) issues.push(`page ${page.pageNum} q${q.num} open-ended question`)
     }
     if (content.chart) {
       for (const issue of validateChart(content.chart)) issues.push(`page ${page.pageNum} ${issue}`)
@@ -208,6 +212,21 @@ export function validateSchema(contentData, contentPages, packageType = 'small')
   }
 
   return issues
+}
+
+// Questions about the student's own drawing, collection or experience ("your leaf",
+// "Did you include…", "Draw a leaf you saw") have no single correct answer, so the
+// answer key ends up blank or "answers vary".
+const OPEN_ENDED_QUESTION = new RegExp([
+  String.raw`\byour (own )?(leaf|leaves|drawing|collage|story|plant|tree|rubbing|favorite|choice|setting|picture|paragraph|sentences?|answer to|observations?)\b`,
+  String.raw`\bdid you\b`,
+  String.raw`\byou (saw|chose|collected|found|picked|included|labeled|drew|wrote|see in your)\b`,
+  String.raw`^\s*(draw|describe)\b|^\s*write (a|an|one|at least|two|three) (sentence|paragraph|fun fact|word to describe)`,
+].join('|'), 'i')
+
+/** True if a question depends on the student's own work or experience. Pure — exported for unit testing. */
+export function isOpenEndedQuestion(question) {
+  return OPEN_ENDED_QUESTION.test(question ?? '')
 }
 
 /** True for a validateSchema issue about a blank answer. Pure — exported for unit testing. */
@@ -257,8 +276,8 @@ Review every question and answer below. For each item check ALL of:
 1. The answer is academically correct (math calculations, spelling, grammar, facts, logic)
 2. The answer actually and specifically answers its question — not just correct in isolation
 3. If the question asks the student to READ data from the picture (counts, chart/table values, labels), its answer must match the exact data in the page's chart (categories/values) or imageSpec (e.g. if the chart says Bananas=7, "how many bananas?" must be 7). Questions answered from subject knowledge — e.g. a matching page asking which habitat a spider lives in — do NOT need to be derivable from the imageSpec; only check that the answer is correct.
-4. The question is appropriate in difficulty for ${plan.gradeLevel} level
-5. The question has exactly ONE correct answer. Flag opinion/guessing questions ("who is likely…", "what do you think…"), questions that ask the student to read a visual detail the imageSpec doesn't define, and negative questions with several valid answers (e.g. "Which direction does Alex NOT patrol?" when three directions fit). Knowledge questions whose answer comes from the subject matter rather than the picture are FINE (e.g. a matching page "Which habitat matches the wolf spider?") — do not flag them.
+4. The question is appropriate in difficulty and vocabulary for ${plan.gradeLevel} level — rewrite it with simpler wording if it uses technical terms (e.g. photosynthesis, glucose, by-product) a student of that grade would not know
+5. The question has exactly ONE correct answer. Flag opinion/guessing questions ("who is likely…", "what do you think…"), questions that ask the student to read a visual detail the imageSpec doesn't define, and negative questions with several valid answers (e.g. "Which direction does Alex NOT patrol?" when three directions fit). Also flag questions about the student's own drawing, collection, story or experience ("your leaf", "Did you include…", "Draw a leaf you saw") — they have no single correct answer. Rewrite each as a knowledge or picture-reading question on the same topic with one verifiable answer — if the page has an empty imageSpec, use a knowledge question that does not refer to any picture, collage or drawing. Knowledge questions whose answer comes from the subject matter rather than the picture are FINE (e.g. a matching page "Which habitat matches the wolf spider?") — do not flag them.
 6. If the answer is wrong, mismatched, or inappropriate, provide correctedAnswer.
 7. If the QUESTION itself fails check 5, rewrite it as correctedQuestion (same skill, topic and difficulty, one verifiable answer) and give its correctedAnswer. Never answer an ambiguous question with "not specified" or "it depends" — rewrite the question instead. Never rewrite a question into one about layout or position on the page (e.g. "Is X shown at the top of the column?").
 8. The picture is drawn from each page's imageSpec and printed on the student page, so a question may only quote or name what the imageSpec prints. If you rewrite a question or change an answer so that it depends on a quote, label, name or number that the imageSpec does not contain, ALSO return the page's complete corrected imageSpec in imageSpecCorrections. On matching pages every left-column item must have its correct match in the right column (e.g. if a quote's speaker is not among the listed figures, replace the quote in the imageSpec and the question together).
