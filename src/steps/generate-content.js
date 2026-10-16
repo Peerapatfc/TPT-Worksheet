@@ -4,6 +4,7 @@ import { groq } from '../llm/clients.js'
 import { callTool } from '../llm/tool-call.js'
 import { MODELS } from '../config/constants.js'
 import { slugify } from '../lib/slugify.js'
+import { mapWithConcurrency } from '../lib/concurrency.js'
 import { addReviewNote } from '../lib/review-notes.js'
 import { quotesMissingFromSpec } from '../lib/spec-consistency.js'
 import { validateChart, CHART_TYPES, CHART_ICONS, CHART_LIMITS } from '../lib/chart-page.js'
@@ -209,6 +210,11 @@ export function validateSchema(contentData, contentPages, packageType = 'small')
   return issues
 }
 
+/** True for a validateSchema issue about a blank answer. Pure — exported for unit testing. */
+export function isEmptyAnswerIssue(issue) {
+  return /empty answer/.test(issue)
+}
+
 // A rewrite that turns a question into one about where something sits on the
 // page ("Which habitat is listed second on the right side?") tests nothing; the
 // recheck kept producing these for matching pages despite the prompt rule.
@@ -219,7 +225,30 @@ export function isLayoutQuestion(question) {
   return LAYOUT_QUESTION.test(question ?? '')
 }
 
-export async function validateAndCorrect(plan, contentData) {
+// One recheck call carrying a whole 26+ page set exceeded Groq's request limit
+// (HTTP 413) and the set shipped unchecked, so pages are rechecked in small chunks.
+export const RECHECK_PAGES_PER_CALL = 5
+const RECHECK_CONCURRENCY = 2
+
+/** Split an array into consecutive chunks of at most `size`. Pure — exported for unit testing. */
+export function chunk(items, size) {
+  const out = []
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size))
+  return out
+}
+
+/** Merge per-chunk recheck results into one validation object. Pure — exported for unit testing. */
+export function mergeValidations(results) {
+  const ok = results.filter(Boolean)
+  return {
+    pass: ok.every(r => r.pass !== false),
+    corrections: ok.flatMap(r => r.corrections ?? []),
+    imageSpecCorrections: ok.flatMap(r => r.imageSpecCorrections ?? []),
+  }
+}
+
+/** Recheck one chunk of pages. Returns the validation args, or null on failure. */
+async function recheckPages(plan, pages) {
   const prompt = `You are an academic fact-checker for elementary school worksheets.
 
 Set: "${plan.setTitle}" | Grade: ${plan.gradeLevel} | Subject: ${plan.subject}
@@ -235,7 +264,7 @@ Review every question and answer below. For each item check ALL of:
 8. The picture is drawn from each page's imageSpec and printed on the student page, so a question may only quote or name what the imageSpec prints. If you rewrite a question or change an answer so that it depends on a quote, label, name or number that the imageSpec does not contain, ALSO return the page's complete corrected imageSpec in imageSpecCorrections. On matching pages every left-column item must have its correct match in the right column (e.g. if a quote's speaker is not among the listed figures, replace the quote in the imageSpec and the question together).
 9. Check the attribution of every quotation. If you are not certain who said it, replace it with a well-documented quotation by one of the listed figures (and update the imageSpec to match).
 
-${JSON.stringify(contentData.pages, null, 2)}
+${JSON.stringify(pages, null, 2)}
 
 Call the validate_content function with your assessment.`
 
@@ -252,13 +281,22 @@ Call the validate_content function with your assessment.`
       step: 'content_recheck',
     })
   } catch (err) {
-    console.warn(`validateAndCorrect failed (${err.status ?? err.message}) — using content as-is`)
-    addReviewNote('fallback', `Q&A recheck failed (${err.status ?? err.message}) — answers were not double-checked`)
-    return contentData
+    console.warn(`recheck of pages ${pages.map(p => p.pageNum).join(',')} failed (${err.status ?? err.message})`)
+    return null
   }
+  return res.args ?? null
+}
 
-  if (!res.args) return contentData
-  return applyRecheck(contentData, res.args)
+export async function validateAndCorrect(plan, contentData) {
+  const groups = chunk(contentData.pages, RECHECK_PAGES_PER_CALL)
+  const results = await mapWithConcurrency(groups, RECHECK_CONCURRENCY, g => recheckPages(plan, g))
+
+  const unchecked = groups.filter((_, i) => !results[i]).flat().map(p => p.pageNum)
+  if (unchecked.length > 0) {
+    addReviewNote('fallback', `Q&A recheck failed for page(s) ${unchecked.join(', ')} — their answers were NOT double-checked`)
+  }
+  if (unchecked.length === contentData.pages.length) return contentData
+  return applyRecheck(contentData, mergeValidations(results))
 }
 
 /**
@@ -374,25 +412,33 @@ export async function generateContent(plan) {
 
   const MAX_RETRIES = 2
   let contentData = null
+  let best = null
 
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
-    contentData = await fetchContent(plan, contentPages)
-    if (!contentData) {
+    const candidate = await fetchContent(plan, contentPages)
+    if (!candidate) {
       if (attempt <= MAX_RETRIES) continue
+      if (best) break
       throw new Error(`Q&A generation failed after ${MAX_RETRIES + 1} attempts — see "generateContent" warnings above`)
     }
 
-    const schemaIssues = validateSchema(contentData, contentPages, plan.packageType)
-    if (schemaIssues.length > 0) {
-      console.warn(`generateContent schema (attempt ${attempt}/${MAX_RETRIES + 1}): ${schemaIssues.join(', ')}`)
-      if (attempt <= MAX_RETRIES) continue
-      console.warn('generateContent: schema still invalid after retries — using best available content')
-      addReviewNote('fallback', `Q&A content still had schema issues after retries: ${schemaIssues.join(', ')}`)
-    }
-
-    contentData = stripAnswerLeaks(await validateAndCorrect(plan, contentData))
-    break
+    const issues = validateSchema(candidate, contentPages, plan.packageType)
+    if (!best || issues.length < best.issues.length) best = { data: candidate, issues }
+    if (issues.length === 0) break
+    console.warn(`generateContent schema (attempt ${attempt}/${MAX_RETRIES + 1}): ${issues.join(', ')}`)
   }
+
+  contentData = best.data
+  if (best.issues.length > 0) {
+    // A blank answer prints as a blank line in the answer key, so it is never shippable.
+    const blank = best.issues.filter(isEmptyAnswerIssue)
+    if (blank.length > 0) {
+      throw new Error(`Q&A content still has ${blank.length} empty answer(s) after ${MAX_RETRIES + 1} attempts: ${blank.join(', ')}`)
+    }
+    console.warn('generateContent: schema still invalid after retries — using best available content')
+    addReviewNote('fallback', `Q&A content still had schema issues after retries: ${best.issues.join(', ')}`)
+  }
+  contentData = stripAnswerLeaks(await validateAndCorrect(plan, contentData))
 
   const slug = slugify(plan.setTitle)
   const date = new Date().toISOString().split('T')[0]
