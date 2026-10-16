@@ -1,0 +1,558 @@
+{
+  "validator": [
+    {
+      "label": "autumn p2 word problems",
+      "setTitle": "Autumn Math Adventures",
+      "image": "images/autumn-p2.jpg",
+      "page": {
+        "pageNum": 2,
+        "type": "worksheet",
+        "content": {
+          "questions": [
+            {
+              "num": 1,
+              "question": "Add the two numbers: 7 + 5 = ?"
+            },
+            {
+              "num": 2,
+              "question": "Subtract: 14 – 6 = ?"
+            },
+            {
+              "num": 3,
+              "question": "What number comes next in the pattern: 3, 5, 7, ___?"
+            },
+            {
+              "num": 4,
+              "question": "If you have 9 apples and give away 4, how many are left?"
+            },
+            {
+              "num": 5,
+              "question": "Count the total number of pumpkins shown in the picture (4 + 3 + 2)."
+            }
+          ]
+        }
+      },
+      "expect": "pass"
+    },
+    {
+      "label": "autumn p5 (old validator false failure)",
+      "setTitle": "Autumn Math Adventures",
+      "image": "images/autumn-p5.jpg",
+      "page": {
+        "pageNum": 5,
+        "type": "worksheet",
+        "content": {
+          "questions": [
+            {
+              "num": 1,
+              "question": "How many leaves remain on Tree 1 after the fall?"
+            },
+            {
+              "num": 2,
+              "question": "How many leaves are left on Tree 2?"
+            },
+            {
+              "num": 3,
+              "question": "What is the total number of leaves that fell from both trees?"
+            },
+            {
+              "num": 4,
+              "question": "If 2 more leaves fall from Tree 1, how many will be left?"
+            },
+            {
+              "num": 5,
+              "question": "Combine the remaining leaves of both trees. What is the sum?"
+            }
+          ]
+        }
+      },
+      "expect": "pass"
+    },
+    {
+      "label": "autumn p11 table (old validator false failure)",
+      "setTitle": "Autumn Math Adventures",
+      "image": "images/autumn-p11.jpg",
+      "page": {
+        "pageNum": 11,
+        "type": "worksheet",
+        "content": {
+          "questions": [
+            {
+              "num": 1,
+              "question": "How many acorns were collected on Tuesday?"
+            },
+            {
+              "num": 2,
+              "question": "Add the acorns collected on Monday and Wednesday."
+            },
+            {
+              "num": 3,
+              "question": "What is the total for the whole week?"
+            },
+            {
+              "num": 4,
+              "question": "If 2 acorns from Thursday are given away, how many remain from Thursday’s collection?"
+            },
+            {
+              "num": 5,
+              "question": "Subtract Friday’s count from Saturday’s (assume Saturday had 8 acorns). What is the difference?"
+            }
+          ]
+        }
+      },
+      "expect": "pass"
+    },
+    {
+      "label": "autumn p12 festival problems (old validator false failure)",
+      "setTitle": "Autumn Math Adventures",
+      "image": "images/autumn-p12.jpg",
+      "page": {
+        "pageNum": 12,
+        "type": "worksheet",
+        "content": {
+          "questions": [
+            {
+              "num": 1,
+              "question": "At the festival, 9 children each win 3 caramel apples. How many apples are given out in total?"
+            },
+            {
+              "num": 2,
+              "question": "There are 5 booths. Each booth sells 6 hot chocolate drinks. How many drinks are sold?"
+            },
+            {
+              "num": 3,
+              "question": "A game costs 2 tickets to play. If a kid has 14 tickets, how many times can they play?"
+            },
+            {
+              "num": 4,
+              "question": "The lantern parade has 12 lanterns. If 4 lanterns are removed for repairs, how many remain?"
+            },
+            {
+              "num": 5,
+              "question": "If the festival lasts 3 days and each day 15 people win a prize, how many prize winners are there in total?"
+            }
+          ]
+        }
+      },
+      "expect": "pass"
+    },
+    {
+      "label": "spiders p5 Fact/Myth \"six legs\" (fact-checking false failure)",
+      "setTitle": "Science of Spiders: Exploring Arachnids",
+      "image": "images/spiders-p5.jpg",
+      "page": {
+        "pageNum": 5,
+        "type": "worksheet",
+        "content": {
+          "questions": [
+            {
+              "num": 1,
+              "question": "Statement 1: Spiders have six legs. Fact or Myth?"
+            },
+            {
+              "num": 2,
+              "question": "Statement 2: All spiders spin webs. Fact or Myth?"
+            },
+            {
+              "num": 3,
+              "question": "Statement 3: Some spiders can jump many times their body length. Fact or Myth?"
+            },
+            {
+              "num": 4,
+              "question": "Statement 4: Spider silk is stronger than steel of the same thickness. Fact or Myth?"
+            },
+            {
+              "num": 5,
+              "question": "Statement 5: A spider’s bite always hurts a lot. Fact or Myth?"
+            },
+            {
+              "num": 6,
+              "question": "Statement 6: Spiders help control insect populations. Fact or Myth?"
+            },
+            {
+              "num": 7,
+              "question": "Statement 7: There are over 45,000 known spider species. Fact or Myth?"
+            },
+            {
+              "num": 8,
+              "question": "Statement 8: Spiders are insects. Fact or Myth?"
+            }
+          ]
+        }
+      },
+      "expect": "pass"
+    },
+    {
+      "label": "spiders p7 matching page",
+      "setTitle": "Science of Spiders: Exploring Arachnids",
+      "image": "images/spiders-p7.jpg",
+      "page": {
+        "pageNum": 7,
+        "type": "worksheet",
+        "content": {
+          "questions": [
+            {
+              "num": 1,
+              "question": "True or False: The Wolf spider is shown at the top of the left column."
+            },
+            {
+              "num": 2,
+              "question": "True or False: The Jumping spider is the second spider listed from the top on the left side."
+            },
+            {
+              "num": 3,
+              "question": "True or False: The Orb‑weaver appears third from the top on the left side."
+            },
+            {
+              "num": 4,
+              "question": "True or False: The Trapdoor spider is the fourth spider in the left column."
+            },
+            {
+              "num": 5,
+              "question": "True or False: The first habitat listed on the right side is Desert."
+            }
+          ]
+        }
+      },
+      "expect": "pass"
+    },
+    {
+      "label": "autumn p12 vs another page's questions",
+      "setTitle": "Autumn Math Adventures",
+      "image": "images/autumn-p12.jpg",
+      "page": {
+        "pageNum": 12,
+        "type": "worksheet",
+        "content": {
+          "questions": [
+            {
+              "num": 1,
+              "question": "Add the two numbers: 7 + 5 = ?"
+            },
+            {
+              "num": 2,
+              "question": "Subtract: 14 – 6 = ?"
+            },
+            {
+              "num": 3,
+              "question": "What number comes next in the pattern: 3, 5, 7, ___?"
+            },
+            {
+              "num": 4,
+              "question": "If you have 9 apples and give away 4, how many are left?"
+            },
+            {
+              "num": 5,
+              "question": "Count the total number of pumpkins shown in the picture (4 + 3 + 2)."
+            }
+          ]
+        }
+      },
+      "expect": "fail"
+    },
+    {
+      "label": "autumn p12 with one number changed (14 -> 18 tickets)",
+      "setTitle": "Autumn Math Adventures",
+      "image": "images/autumn-p12.jpg",
+      "page": {
+        "pageNum": 12,
+        "type": "worksheet",
+        "content": {
+          "questions": [
+            {
+              "num": 1,
+              "question": "At the festival, 9 children each win 3 caramel apples. How many apples are given out in total?"
+            },
+            {
+              "num": 2,
+              "question": "There are 5 booths. Each booth sells 6 hot chocolate drinks. How many drinks are sold?"
+            },
+            {
+              "num": 3,
+              "question": "A game costs 2 tickets to play. If a kid has 18 tickets, how many times can they play?"
+            },
+            {
+              "num": 4,
+              "question": "The lantern parade has 12 lanterns. If 4 lanterns are removed for repairs, how many remain?"
+            },
+            {
+              "num": 5,
+              "question": "If the festival lasts 3 days and each day 15 people win a prize, how many prize winners are there in total?"
+            }
+          ]
+        }
+      },
+      "expect": "fail"
+    },
+    {
+      "label": "spiders p11 crossword with answers printed in clues",
+      "setTitle": "Science of Spiders: Exploring Arachnids",
+      "image": "images/spiders-p11.jpg",
+      "page": {
+        "pageNum": 11,
+        "type": "worksheet",
+        "content": {
+          "questions": [
+            {
+              "num": 1,
+              "question": "What is the answer to Across clue 1 (3 letters)?"
+            },
+            {
+              "num": 2,
+              "question": "What is the answer to Across clue 4 (5 letters)?"
+            },
+            {
+              "num": 3,
+              "question": "What is the answer to Down clue 2 (4 letters)?"
+            },
+            {
+              "num": 4,
+              "question": "What is the answer to Down clue 3 (3 letters)?"
+            },
+            {
+              "num": 5,
+              "question": "How many letters are in the answer to Across clue 6?"
+            }
+          ]
+        }
+      },
+      "expect": "fail",
+      "knownGap": "gpt-4o-mini does not notice answers printed on the page; prevented upstream (banned activities, stripAnswerLeaks)"
+    }
+  ],
+  "recheck": [
+    {
+      "label": "matching knowledge questions are not turned into layout questions; ambiguous negative and \"likely\" question are rewritten",
+      "plan": {
+        "setTitle": "Science of Spiders",
+        "gradeLevel": "Grade 3",
+        "subject": "Science"
+      },
+      "pages": [
+        {
+          "pageNum": 7,
+          "title": "Match Spiders to Their Habitats",
+          "imageSpec": "Left (top to bottom): Wolf spider, Jumping spider, Orb-weaver, Trapdoor spider. Right (top to bottom, shuffled): Desert, Grassland, Wetland, Forest.",
+          "questions": [
+            {
+              "num": 1,
+              "question": "Which habitat matches the Wolf spider?",
+              "answer": "Grassland"
+            },
+            {
+              "num": 2,
+              "question": "Which habitat matches the Orb-weaver?",
+              "answer": "Forest"
+            },
+            {
+              "num": 3,
+              "question": "True or False: Trapdoor spiders dig burrows in the ground.",
+              "answer": "True"
+            }
+          ]
+        },
+        {
+          "pageNum": 10,
+          "title": "Safety patrol",
+          "imageSpec": "Four adults with name tags and patrol directions: Alex – North, Maya – East, Sam – South, Priya – West.",
+          "questions": [
+            {
+              "num": 1,
+              "question": "Which adult patrols the East area?",
+              "answer": "Maya"
+            },
+            {
+              "num": 5,
+              "question": "Alex does NOT patrol which direction?",
+              "answer": "East"
+            }
+          ]
+        },
+        {
+          "pageNum": 11,
+          "title": "Family rules",
+          "imageSpec": "Family of four (mom, dad, child 1, child 2) at a table. Three speech bubbles: \"1. Stay together\", \"2. Use reflective gear\", \"3. Check candy before eating\".",
+          "questions": [
+            {
+              "num": 4,
+              "question": "Who is likely to remind the kids to use reflective gear?",
+              "answer": "The illustration does not indicate which adult says the rule."
+            }
+          ]
+        }
+      ],
+      "expectRewritten": [
+        "10-5",
+        "11-4"
+      ],
+      "expectNotLayout": [
+        "7-1",
+        "7-2",
+        "7-3",
+        "10-1"
+      ]
+    },
+    {
+      "label": "history p4 quote matching: a rewritten question must not cite a quote the image spec lacks",
+      "plan": {
+        "setTitle": "Exploring Historical Figures in October",
+        "gradeLevel": "Grade 4",
+        "subject": "Social Studies"
+      },
+      "pages": [
+        {
+          "pageNum": 4,
+          "title": "Famous Quotes Matching",
+          "imageSpec": "Left (top to bottom): \"Give me liberty, or give me death!\"; \"I have a dream that one day...\"; \"The only thing we have to fear is fear itself.\"; \"If you want something said, ask a man; if you want something done, ask a woman.\"; \"I am not afraid of storms, for I am learning how to sail my ship.\". Right (top to bottom, shuffled): Amelia Earhart; Benjamin Franklin; Harriet Tubman; Martin Luther King Jr.; George Washington.",
+          "questions": [
+            {
+              "num": 1,
+              "question": "Match the quote \"Give me liberty, or give me death!\" to the correct figure.",
+              "answer": "Patrick Henry"
+            },
+            {
+              "num": 2,
+              "question": "Who said, \"I have a dream that one day...\"?",
+              "answer": "Martin Luther King Jr."
+            },
+            {
+              "num": 3,
+              "question": "Identify the speaker of \"The only thing we have to fear is fear itself.\"",
+              "answer": "Franklin D. Roosevelt"
+            },
+            {
+              "num": 4,
+              "question": "Which figure said, \"If you want something said, ask a man; if you want something done, ask a woman.\"?",
+              "answer": "Margaret Thatcher"
+            },
+            {
+              "num": 5,
+              "question": "Who expressed, \"I am not afraid of storms, for I am learning how to sail my ship.\"?",
+              "answer": "Amelia Earhart"
+            }
+          ]
+        }
+      ],
+      "expectRewritten": [],
+      "expectNotLayout": [],
+      "expectQuotesInSpec": [
+        4
+      ]
+    },
+    {
+      "label": "open-ended personal questions (your leaf / your drawing / did you include) are rewritten into verifiable knowledge questions",
+      "plan": {
+        "setTitle": "Exploring Leaves and Plant Life in Fall",
+        "gradeLevel": "Grade 2",
+        "subject": "Science"
+      },
+      "pages": [
+        {
+          "pageNum": 6,
+          "title": "Observe a Leaf",
+          "imageSpec": "",
+          "questions": [
+            {
+              "num": 1,
+              "question": "Draw a leaf you saw this fall in the space provided.",
+              "answer": "A drawing of a leaf"
+            },
+            {
+              "num": 2,
+              "question": "Write one word to describe its color.",
+              "answer": "red"
+            },
+            {
+              "num": 3,
+              "question": "How many points (or lobes) does your leaf have?",
+              "answer": "5"
+            },
+            {
+              "num": 4,
+              "question": "Is the leaf from a deciduous or evergreen tree?",
+              "answer": "deciduous"
+            },
+            {
+              "num": 5,
+              "question": "What is the name of the tree that most often has this leaf?",
+              "answer": "Maple"
+            }
+          ]
+        },
+        {
+          "pageNum": 7,
+          "title": "Plant Parts",
+          "imageSpec": "A plant with labeled parts: leaf, stem, root, flower.",
+          "questions": [
+            {
+              "num": 1,
+              "question": "Which plant part takes in water from the soil?",
+              "answer": "root"
+            },
+            {
+              "num": 2,
+              "question": "Which plant part makes food using sunlight?",
+              "answer": "leaf"
+            },
+            {
+              "num": 3,
+              "question": "How many plant parts are labeled?",
+              "answer": "4"
+            },
+            {
+              "num": 4,
+              "question": "Which plant part holds the plant up?",
+              "answer": "stem"
+            }
+          ]
+        },
+        {
+          "pageNum": 12,
+          "title": "Leaf Collage",
+          "imageSpec": "",
+          "questions": [
+            {
+              "num": 1,
+              "question": "How many leaves should you collect for the collage?",
+              "answer": "5"
+            },
+            {
+              "num": 2,
+              "question": "Write a sentence describing the colors in your collage.",
+              "answer": "Answers vary"
+            },
+            {
+              "num": 3,
+              "question": "Did you include a leaf with three points? (yes/no)",
+              "answer": "yes"
+            },
+            {
+              "num": 4,
+              "question": "What is the most common color you see?",
+              "answer": "Answers vary"
+            },
+            {
+              "num": 5,
+              "question": "Is the collage inside or outside the classroom?",
+              "answer": "inside"
+            }
+          ]
+        }
+      ],
+      "expectRewritten": [
+        "6-1",
+        "6-3",
+        "12-2",
+        "12-3",
+        "12-4",
+        "12-5"
+      ],
+      "expectNotLayout": [
+        "7-1",
+        "7-2",
+        "7-3",
+        "7-4"
+      ]
+    }
+  ]
+}

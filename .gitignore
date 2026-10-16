@@ -5,3 +5,4 @@ scripts/test-drive-upload.js
 *.json
 !package.json
 !package-lock.json
+!eval/cases.json
