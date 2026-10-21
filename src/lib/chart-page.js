@@ -31,6 +31,26 @@ export function validateChart(chart) {
   return issues
 }
 
+/**
+ * Make an invalid chart drawable without changing any value. The model often
+ * writes realistic numbers (40, 50) beyond the bar/picture-graph limits; if such a
+ * chart were dropped the page would be drawn by the image model, which gets the
+ * counts wrong while the answer key uses the real data. A table holds the same
+ * numbers exactly, so an over-limit bar/pictograph becomes a table. Returns
+ * { chart, changed }; `chart` is null when it cannot be repaired (bad values,
+ * fewer than 2 or more than the table's row limit). Pure — exported for unit testing.
+ */
+export function repairChart(chart) {
+  if (validateChart(chart).length === 0) return { chart, changed: false }
+  const cats = Array.isArray(chart?.categories) ? chart.categories : []
+  const table = CHART_LIMITS.table
+  const drawable = cats.length >= 2 && cats.length <= table.maxCategories &&
+    cats.every(c => String(c?.label ?? '').trim() && Number.isInteger(c?.value) && c.value >= 0 && c.value <= table.maxValue)
+  if (!drawable) return { chart: null, changed: false }
+  const { icon, labelHeader, valueHeader, ...rest } = chart
+  return { chart: { ...rest, type: 'table', labelHeader, valueHeader }, changed: true }
+}
+
 // ---- icons ---------------------------------------------------------------
 
 function iconSvg(shape, cx, cy, r, color) {
@@ -131,8 +151,14 @@ function table(chart, color, x0, y0, x1, y1) {
   const rowH = Math.min(64, (y1 - y0) / (n + 1))
   const split = left + w * 0.62
   let out = `<rect x="${left}" y="${y0}" width="${w}" height="${rowH}" fill="${color}"/>`
-  out += text((left + split) / 2, y0 + rowH / 2 + 9, chart.labelHeader || 'Item', { size: 26, weight: 'bold', fill: '#fff', anchor: 'middle' })
-  out += text((split + left + w) / 2, y0 + rowH / 2 + 9, chart.valueHeader || (chart.unit ? `Number of ${chart.unit}` : 'Number'), { size: 26, weight: 'bold', fill: '#fff', anchor: 'middle' })
+  // Shrink a long header until it fits its column ("Number of Attendees" was cut to "Number of Attende").
+  const header = (label, colW, cx) => {
+    let size = 26
+    while (size > 16 && wrapText(label, colW - 20, size, true).length > 1) size -= 2
+    return text(cx, y0 + rowH / 2 + 9, label, { size, weight: 'bold', fill: '#fff', anchor: 'middle' })
+  }
+  out += header(chart.labelHeader || 'Item', split - left, (left + split) / 2)
+  out += header(chart.valueHeader || (chart.unit ? `Number of ${chart.unit}` : 'Number'), left + w - split, (split + left + w) / 2)
   chart.categories.forEach((c, i) => {
     const top = y0 + (i + 1) * rowH
     out += `<rect x="${left}" y="${top}" width="${w}" height="${rowH}" fill="${i % 2 ? '#fff' : '#f4f4f4'}" stroke="${GRID}" class="chart-row"/>`
