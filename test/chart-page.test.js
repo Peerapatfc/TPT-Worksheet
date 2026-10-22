@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { chartPageSvg, validateChart } from '../src/lib/chart-page.js'
+import { chartPageSvg, validateChart, repairChart } from '../src/lib/chart-page.js'
 import { generatePages, isChartPage } from '../src/steps/generate-pages.js'
 import { validateSchema } from '../src/steps/generate-content.js'
 
@@ -89,5 +89,33 @@ describe('validateSchema with charts', () => {
     const qs = Array.from({ length: 4 }, (_, i) => ({ num: i + 1, question: 'q', answer: 'a' }))
     const issues = validateSchema({ pages: [{ pageNum: 2, questions: qs, chart: { type: 'pictograph', title: 't', categories: cats(20, 1) } }] }, [{ pageNum: 2 }])
     expect(issues).toEqual(['page 2 chart value for "Cat 1" must be a whole number 0–12 (got 20)'])
+  })
+})
+
+describe('repairChart', () => {
+  it('keeps a valid chart as is', () => {
+    const chart = { type: 'bar', title: 't', categories: cats(1, 20) }
+    expect(repairChart(chart)).toEqual({ chart, changed: false })
+  })
+
+  it('turns an over-limit bar chart into a table with the same numbers', () => {
+    const chart = { type: 'bar', title: 'Sales', unit: 'item', categories: cats(40, 35, 50) }
+    const { chart: fixed, changed } = repairChart(chart)
+    expect(changed).toBe(true)
+    expect(fixed.type).toBe('table')
+    expect(fixed.categories).toEqual(chart.categories)
+    expect(validateChart(fixed)).toEqual([])
+  })
+
+  it('cannot repair fractional values or too many rows', () => {
+    expect(repairChart({ type: 'bar', categories: [{ label: 'a', value: 2.5 }, { label: 'b', value: 1 }] }).chart).toBeNull()
+    expect(repairChart({ type: 'bar', categories: cats(30, 1, 2, 3, 4, 5, 6, 7, 8) }).chart).toBeNull()
+  })
+})
+
+describe('table header', () => {
+  it('shrinks a long value header instead of cutting it', () => {
+    const svg = chartPageSvg(plan, { pageNum: 2, content: { questions: [], chart: { type: 'table', title: 't', valueHeader: 'Number of Attendees', categories: cats(1, 2) } } })
+    expect(svg).toContain('Number of Attendees')
   })
 })

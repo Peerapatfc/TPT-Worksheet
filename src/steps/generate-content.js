@@ -7,7 +7,7 @@ import { slugify } from '../lib/slugify.js'
 import { mapWithConcurrency } from '../lib/concurrency.js'
 import { addReviewNote } from '../lib/review-notes.js'
 import { quotesMissingFromSpec } from '../lib/spec-consistency.js'
-import { validateChart, CHART_TYPES, CHART_ICONS, CHART_LIMITS } from '../lib/chart-page.js'
+import { validateChart, repairChart, CHART_TYPES, CHART_ICONS, CHART_LIMITS } from '../lib/chart-page.js'
 
 const contentTool = {
   type: 'function',
@@ -125,7 +125,8 @@ For each worksheet/activity page, follow TWO steps in order:
 
 STEP 1 — Define imageSpec (exact visual blueprint):
 If the page needs a data visualization, define ALL values precisely so an AI image generator can draw it exactly:
-- Picture graphs, bar graphs, and simple category/number tables: do NOT describe them in imageSpec. Fill "chart" instead — code draws it exactly, so the answer key always matches. Whole numbers only; picture graph ≤${CHART_LIMITS.pictograph.maxCategories} categories and ≤${CHART_LIMITS.pictograph.maxValue} per category (one icon = 1 unit), bar graph ≤${CHART_LIMITS.bar.maxCategories} bars with values ≤${CHART_LIMITS.bar.maxValue}, table ≤${CHART_LIMITS.table.maxCategories} rows. Leave imageSpec "" on chart pages. Every question on a chart page must be answerable by reading the chart.
+- Picture graphs, bar graphs, and simple category/number tables: do NOT describe them in imageSpec. Fill "chart" instead — code draws it exactly, so the answer key always matches. Whole numbers only; picture graph ≤${CHART_LIMITS.pictograph.maxCategories} categories and ≤${CHART_LIMITS.pictograph.maxValue} per category (one icon = 1 unit), bar graph ≤${CHART_LIMITS.bar.maxCategories} bars with values ≤${CHART_LIMITS.bar.maxValue}, table ≤${CHART_LIMITS.table.maxCategories} rows. If the data needs bigger numbers than those limits (e.g. 40 or 50 units), use a table instead of a bar/picture graph. Leave imageSpec "" on chart pages. Every question on a chart page must be answerable by reading the chart.
+- Never plan pie charts, line graphs, double/grouped bar graphs, or "find the mistake in this graph" pages: code draws only one-series picture graphs, bar graphs and tables, and the image model cannot draw the others with correct values. Use a single-series chart or table with questions on the same data.
 - Number sequences / patterns: list every term explicitly
 - Matching activities (draw-a-line): list left column items top-to-bottom, then list right column items in a SHUFFLED order (NOT the same order as left column) so correct answers require diagonal or non-straight lines. Specify both columns explicitly: "Left (top to bottom): A, B, C, D. Right (top to bottom, shuffled): C, A, D, B." Every left item MUST have its correct match among the right items — never list a quote, term or picture whose answer is not in the other column.
 - Quotations: only use a quotation if you are certain of the speaker, and only attribute it to someone in the activity. Questions may only quote text that the imageSpec prints.
@@ -177,6 +178,28 @@ Call the generate_page_content function with content for all pages.`
     return null
   }
   return res.args
+}
+
+/**
+ * Turn each over-limit chart into a table (same numbers) so the page is still drawn by
+ * code and matches its answer key; drops a chart that cannot be repaired. Returns the
+ * review notes instead of logging them so a retried attempt that is discarded leaves
+ * no trace. Mutates contentData. Pure otherwise — exported for unit testing.
+ */
+export function repairCharts(contentData) {
+  const notes = []
+  for (const page of contentData?.pages ?? []) {
+    if (!page.chart) continue
+    const { chart, changed } = repairChart(page.chart)
+    if (chart === null) {
+      notes.push(`p${page.pageNum}: chart could not be repaired and was dropped — the page will be drawn by the image model, so check its answers against the picture`)
+      delete page.chart
+    } else if (changed) {
+      notes.push(`p${page.pageNum}: chart was outside the bar/picture-graph limits, so it is drawn as a table with the same numbers`)
+      page.chart = chart
+    }
+  }
+  return notes
 }
 
 /**
@@ -306,16 +329,38 @@ Call the validate_content function with your assessment.`
   return res.args ?? null
 }
 
+/**
+ * Recheck a chunk; if the call fails (a 5-page chunk once hit HTTP 413 and shipped
+ * unchecked), retry each half on its own. Returns { validation, unchecked } where
+ * `unchecked` lists the page numbers no call managed to check. `check` is injectable
+ * for tests.
+ */
+export async function recheckWithSplit(plan, pages, check = recheckPages) {
+  const validation = await check(plan, pages)
+  if (validation) return { validation, unchecked: [] }
+  if (pages.length < 2) {
+    // Groq's 400 tool_use_failed is sporadic — a single page gets one more try.
+    const again = await check(plan, pages)
+    return again ? { validation: again, unchecked: [] } : { validation: null, unchecked: pages.map(p => p.pageNum) }
+  }
+  const mid = Math.ceil(pages.length / 2)
+  const halves = await Promise.all([pages.slice(0, mid), pages.slice(mid)].map(h => recheckWithSplit(plan, h, check)))
+  return {
+    validation: halves.some(h => h.validation) ? mergeValidations(halves.map(h => h.validation)) : null,
+    unchecked: halves.flatMap(h => h.unchecked),
+  }
+}
+
 export async function validateAndCorrect(plan, contentData) {
   const groups = chunk(contentData.pages, RECHECK_PAGES_PER_CALL)
-  const results = await mapWithConcurrency(groups, RECHECK_CONCURRENCY, g => recheckPages(plan, g))
+  const results = await mapWithConcurrency(groups, RECHECK_CONCURRENCY, g => recheckWithSplit(plan, g))
 
-  const unchecked = groups.filter((_, i) => !results[i]).flat().map(p => p.pageNum)
+  const unchecked = results.flatMap(r => r.unchecked)
   if (unchecked.length > 0) {
     addReviewNote('fallback', `Q&A recheck failed for page(s) ${unchecked.join(', ')} — their answers were NOT double-checked`)
   }
   if (unchecked.length === contentData.pages.length) return contentData
-  return applyRecheck(contentData, mergeValidations(results))
+  return applyRecheck(contentData, mergeValidations(results.map(r => r.validation)))
 }
 
 /**
@@ -441,13 +486,15 @@ export async function generateContent(plan) {
       throw new Error(`Q&A generation failed after ${MAX_RETRIES + 1} attempts — see "generateContent" warnings above`)
     }
 
+    const repairNotes = repairCharts(candidate)
     const issues = validateSchema(candidate, contentPages, plan.packageType)
-    if (!best || issues.length < best.issues.length) best = { data: candidate, issues }
+    if (!best || issues.length < best.issues.length) best = { data: candidate, issues, repairNotes }
     if (issues.length === 0) break
     console.warn(`generateContent schema (attempt ${attempt}/${MAX_RETRIES + 1}): ${issues.join(', ')}`)
   }
 
   contentData = best.data
+  best.repairNotes.forEach(m => addReviewNote('chart_repaired', m))
   if (best.issues.length > 0) {
     // A blank answer prints as a blank line in the answer key, so it is never shippable.
     const blank = best.issues.filter(isEmptyAnswerIssue)

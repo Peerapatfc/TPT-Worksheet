@@ -169,7 +169,7 @@ Each answer_key MUST have sourcePageNums set to an array of the 1–2 pageNums i
 2. What's included: mention the total page count (from your plan), the number of no-prep worksheets/activity pages, and that answer keys are included for every page.
 3. Who it's for and best use cases: grade level plus 3–4 ideal contexts (whole class, small groups, literacy/math centers, homework, morning work, sub plans, or intervention).
 4. Ease of use: start with "Print and go — no prep needed." Add 1–2 specific use scenarios.
-5. Skills covered: list 3–5 specific skills from the pages you planned, in natural sentence form.
+5. Skills covered: list 3–5 specific skills from the pages you planned, in natural sentence form. Name only graph types and skills that appear on your planned pages (never mention pie charts or line graphs unless a page really has one), and count the activity pages exactly.
 6. Standards (conditional): if Math or ELA subject, write "Aligned to Common Core State Standards (CCSS)." If Science, write "Aligned to Next Generation Science Standards (NGSS)." Otherwise omit this sentence entirely.
 7. Close: end with "Answer key included for all pages."
 ${sorLanguage}
@@ -187,6 +187,8 @@ Pick topics that are DIFFERENT from the previously generated list above.
 ${step2}
 
 Never plan crossword puzzles, word searches, mazes, or dot-to-dot pages — the image generator cannot draw a consistent grid or path. Use matching, fill-in-the-blank, labeling, sorting, or graphing activities instead.
+
+For graphing sets, plan only single-series picture graphs, bar graphs and data tables (code draws these exactly). Never plan pie charts, line graphs, double/grouped bar graphs, or "find the mistake in this graph" / misdrawn-graph pages — the image generator cannot draw their values correctly.
 
 Every page must have answers a teacher can check in an answer key. Do not plan pages that depend on what the student draws, collects, observes or writes about their own life (draw-your-own, collages, nature walks, "write a story about…") — plan labeling, matching, sorting, fill-in or short-answer pages with one correct answer. Keep vocabulary at the set's grade level (word banks and labels must use words that grade can read), and do not plan matching pictures of look-alike items (e.g. different leaf species) that the image generator cannot draw reliably.
 
@@ -294,7 +296,7 @@ Call the generate_worksheet_plan function with the complete plan.`
 }
 
 // Activities whose grid/path an image model cannot draw consistently.
-const BANNED_ACTIVITY = /\b(crossword|word[\s-]?search|maze|dot[\s-]to[\s-]dot|connect[\s-]the[\s-]dots)\b/i
+const BANNED_ACTIVITY = /\b(crossword|word[\s-]?search|maze|dot[\s-]to[\s-]dot|connect[\s-]the[\s-]dots|pie[\s-]?chart|line[\s-]graph|(double|grouped|side[\s-]by[\s-]side)[\s-]bar|(mis|wrongly[\s-]?)drawn[\s-]graph|error[\s-]spotting[\s-]graph|(find|spot|fix|correct)[\s-]the[\s-](mistake|error)s?[\s-]in[\s-]the[\s-]graph)\b/i
 
 /**
  * Validate a brainstorm candidate plan against structural and taxonomy rules.
@@ -338,5 +340,5 @@ export function validate(plan, maxPages, packageType) {
     throw new Error('Missing tptListing.teachingDuration')
   const banned = plan.pages.filter(p => BANNED_ACTIVITY.test(`${p.filename ?? ''} ${p.imagePrompt ?? ''}`))
   if (banned.length > 0)
-    throw new Error(`pages ${banned.map(p => p.pageNum).join(', ')} plan a crossword/word search/maze/dot-to-dot, which the image generator cannot draw correctly — replace them with matching, fill-in-the-blank, labeling, sorting, or graphing activities`)
+    throw new Error(`pages ${banned.map(p => p.pageNum).join(', ')} plan a crossword/word search/maze/dot-to-dot/pie chart/line graph/double bar graph/misdrawn graph, which the image generator cannot draw correctly — replace them with matching, fill-in-the-blank, labeling, sorting, or single-series bar/picture graphs and tables`)
 }
