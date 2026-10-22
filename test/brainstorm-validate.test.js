@@ -98,3 +98,23 @@ describe('validate subject areas', () => {
     expect(() => validate(makePlan({ subjectAreas: ['Social Studies', 'U.S. History'] }), 30, 'small')).not.toThrow()
   })
 })
+
+describe('brainstorm validate — graph types the image model cannot draw', () => {
+  it.each([
+    'a pie chart of favorite foods',
+    'Line graph of temperatures',
+    'double bar graph of apples',
+    'Look at the misdrawn graph and fix it',
+    'Find the mistakes in the graph',
+  ])('rejects "%s"', (imagePrompt) => {
+    const plan = makePlan({ worksheets: 10 })
+    plan.pages[3].imagePrompt = imagePrompt
+    expect(() => validate(plan, 30, 'small')).toThrow(/cannot draw/)
+  })
+
+  it('still accepts a plain bar graph page', () => {
+    const plan = makePlan({ worksheets: 10 })
+    plan.pages[3].imagePrompt = 'Bar graph of crops harvested with questions'
+    expect(() => validate(plan, 30, 'small')).not.toThrow()
+  })
+})

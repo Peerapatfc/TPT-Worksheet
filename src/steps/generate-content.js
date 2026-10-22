@@ -7,7 +7,7 @@ import { slugify } from '../lib/slugify.js'
 import { mapWithConcurrency } from '../lib/concurrency.js'
 import { addReviewNote } from '../lib/review-notes.js'
 import { quotesMissingFromSpec } from '../lib/spec-consistency.js'
-import { validateChart, CHART_TYPES, CHART_ICONS, CHART_LIMITS } from '../lib/chart-page.js'
+import { validateChart, repairChart, CHART_TYPES, CHART_ICONS, CHART_LIMITS } from '../lib/chart-page.js'
 
 const contentTool = {
   type: 'function',
@@ -125,7 +125,8 @@ For each worksheet/activity page, follow TWO steps in order:
 
 STEP 1 — Define imageSpec (exact visual blueprint):
 If the page needs a data visualization, define ALL values precisely so an AI image generator can draw it exactly:
-- Picture graphs, bar graphs, and simple category/number tables: do NOT describe them in imageSpec. Fill "chart" instead — code draws it exactly, so the answer key always matches. Whole numbers only; picture graph ≤${CHART_LIMITS.pictograph.maxCategories} categories and ≤${CHART_LIMITS.pictograph.maxValue} per category (one icon = 1 unit), bar graph ≤${CHART_LIMITS.bar.maxCategories} bars with values ≤${CHART_LIMITS.bar.maxValue}, table ≤${CHART_LIMITS.table.maxCategories} rows. Leave imageSpec "" on chart pages. Every question on a chart page must be answerable by reading the chart.
+- Picture graphs, bar graphs, and simple category/number tables: do NOT describe them in imageSpec. Fill "chart" instead — code draws it exactly, so the answer key always matches. Whole numbers only; picture graph ≤${CHART_LIMITS.pictograph.maxCategories} categories and ≤${CHART_LIMITS.pictograph.maxValue} per category (one icon = 1 unit), bar graph ≤${CHART_LIMITS.bar.maxCategories} bars with values ≤${CHART_LIMITS.bar.maxValue}, table ≤${CHART_LIMITS.table.maxCategories} rows. If the data needs bigger numbers than those limits (e.g. 40 or 50 units), use a table instead of a bar/picture graph. Leave imageSpec "" on chart pages. Every question on a chart page must be answerable by reading the chart.
+- Never plan pie charts, line graphs, double/grouped bar graphs, or "find the mistake in this graph" pages: code draws only one-series picture graphs, bar graphs and tables, and the image model cannot draw the others with correct values. Use a single-series chart or table with questions on the same data.
 - Number sequences / patterns: list every term explicitly
 - Matching activities (draw-a-line): list left column items top-to-bottom, then list right column items in a SHUFFLED order (NOT the same order as left column) so correct answers require diagonal or non-straight lines. Specify both columns explicitly: "Left (top to bottom): A, B, C, D. Right (top to bottom, shuffled): C, A, D, B." Every left item MUST have its correct match among the right items — never list a quote, term or picture whose answer is not in the other column.
 - Quotations: only use a quotation if you are certain of the speaker, and only attribute it to someone in the activity. Questions may only quote text that the imageSpec prints.
@@ -148,6 +149,9 @@ STEP 2 — Generate Q&A from your imageSpec:
 - Knowledge questions are fine (e.g. "Which habitat does the wolf spider live in?"). Only avoid questions that ask the student to READ a visual detail the imageSpec does not define (e.g. who is speaking when the speakers aren't specified).
 - Avoid negative questions ("Which direction does X NOT…", "Which is not…") unless exactly one option fits.
 - For open-ended "why/explain" questions, give one concise model answer.
+- Never ask about the student's own drawing, collection, collage, story, observations or experience ("your leaf", "Draw a leaf you saw", "Did you include…", "Write a sentence about your…"). The answer key must hold ONE concrete correct answer for every question, so a page may not depend on what a student draws, collects or writes. Ask knowledge or picture-reading questions instead.
+- Use only words a ${plan.gradeLevel} student can read and understand. Avoid technical terms (e.g. photosynthesis, glucose, by-product, chlorophyll) unless the page itself defines them in the imageSpec; prefer everyday wording.
+- Picture matching (pictures on one side, names on the other): every picture must be unmistakably different from the others in shape and colour, and a student must be able to tell which name belongs to it. Do not match look-alike items that only an expert can tell apart (e.g. different leaf species by outline) — the image generator cannot draw those reliably.
 
 Pages:
 ${pageDescriptions}
@@ -165,7 +169,7 @@ Call the generate_page_content function with content for all pages.`
       step: 'content',
     })
   } catch (err) {
-    console.warn(`generateContent fetch failed (${err.status ?? err.message})`)
+    console.warn(`generateContent fetch failed (${err.status ?? err.message}${err.status ? ` ${JSON.stringify(err.error ?? '').slice(0, 300)}` : ''})`)
     return null
   }
 
@@ -174,6 +178,28 @@ Call the generate_page_content function with content for all pages.`
     return null
   }
   return res.args
+}
+
+/**
+ * Turn each over-limit chart into a table (same numbers) so the page is still drawn by
+ * code and matches its answer key; drops a chart that cannot be repaired. Returns the
+ * review notes instead of logging them so a retried attempt that is discarded leaves
+ * no trace. Mutates contentData. Pure otherwise — exported for unit testing.
+ */
+export function repairCharts(contentData) {
+  const notes = []
+  for (const page of contentData?.pages ?? []) {
+    if (!page.chart) continue
+    const { chart, changed } = repairChart(page.chart)
+    if (chart === null) {
+      notes.push(`p${page.pageNum}: chart could not be repaired and was dropped — the page will be drawn by the image model, so check its answers against the picture`)
+      delete page.chart
+    } else if (changed) {
+      notes.push(`p${page.pageNum}: chart was outside the bar/picture-graph limits, so it is drawn as a table with the same numbers`)
+      page.chart = chart
+    }
+  }
+  return notes
 }
 
 /**
@@ -201,6 +227,7 @@ export function validateSchema(contentData, contentPages, packageType = 'small')
     for (const q of content.questions) {
       if (!q.question?.trim()) issues.push(`page ${page.pageNum} q${q.num} empty question`)
       if (!q.answer?.trim()) issues.push(`page ${page.pageNum} q${q.num} empty answer`)
+      if (isOpenEndedQuestion(q.question)) issues.push(`page ${page.pageNum} q${q.num} open-ended question`)
     }
     if (content.chart) {
       for (const issue of validateChart(content.chart)) issues.push(`page ${page.pageNum} ${issue}`)
@@ -208,6 +235,21 @@ export function validateSchema(contentData, contentPages, packageType = 'small')
   }
 
   return issues
+}
+
+// Questions about the student's own drawing, collection or experience ("your leaf",
+// "Did you include…", "Draw a leaf you saw") have no single correct answer, so the
+// answer key ends up blank or "answers vary".
+const OPEN_ENDED_QUESTION = new RegExp([
+  String.raw`\byour (own )?(leaf|leaves|drawing|collage|story|plant|tree|rubbing|favorite|choice|setting|picture|paragraph|sentences?|answer to|observations?)\b`,
+  String.raw`\bdid you\b`,
+  String.raw`\byou (saw|chose|collected|found|picked|included|labeled|drew|wrote|see in your)\b`,
+  String.raw`^\s*(draw|describe)\b|^\s*write (a|an|one|at least|two|three) (sentence|paragraph|fun fact|word to describe)`,
+].join('|'), 'i')
+
+/** True if a question depends on the student's own work or experience. Pure — exported for unit testing. */
+export function isOpenEndedQuestion(question) {
+  return OPEN_ENDED_QUESTION.test(question ?? '')
 }
 
 /** True for a validateSchema issue about a blank answer. Pure — exported for unit testing. */
@@ -257,8 +299,8 @@ Review every question and answer below. For each item check ALL of:
 1. The answer is academically correct (math calculations, spelling, grammar, facts, logic)
 2. The answer actually and specifically answers its question — not just correct in isolation
 3. If the question asks the student to READ data from the picture (counts, chart/table values, labels), its answer must match the exact data in the page's chart (categories/values) or imageSpec (e.g. if the chart says Bananas=7, "how many bananas?" must be 7). Questions answered from subject knowledge — e.g. a matching page asking which habitat a spider lives in — do NOT need to be derivable from the imageSpec; only check that the answer is correct.
-4. The question is appropriate in difficulty for ${plan.gradeLevel} level
-5. The question has exactly ONE correct answer. Flag opinion/guessing questions ("who is likely…", "what do you think…"), questions that ask the student to read a visual detail the imageSpec doesn't define, and negative questions with several valid answers (e.g. "Which direction does Alex NOT patrol?" when three directions fit). Knowledge questions whose answer comes from the subject matter rather than the picture are FINE (e.g. a matching page "Which habitat matches the wolf spider?") — do not flag them.
+4. The question is appropriate in difficulty and vocabulary for ${plan.gradeLevel} level — rewrite it with simpler wording if it uses technical terms (e.g. photosynthesis, glucose, by-product) a student of that grade would not know
+5. The question has exactly ONE correct answer. Flag opinion/guessing questions ("who is likely…", "what do you think…"), questions that ask the student to read a visual detail the imageSpec doesn't define, and negative questions with several valid answers (e.g. "Which direction does Alex NOT patrol?" when three directions fit). Also flag questions about the student's own drawing, collection, story or experience ("your leaf", "Did you include…", "Draw a leaf you saw") — they have no single correct answer. Rewrite each as a knowledge or picture-reading question on the same topic with one verifiable answer — if the page has an empty imageSpec, use a knowledge question that does not refer to any picture, collage or drawing. Knowledge questions whose answer comes from the subject matter rather than the picture are FINE (e.g. a matching page "Which habitat matches the wolf spider?") — do not flag them.
 6. If the answer is wrong, mismatched, or inappropriate, provide correctedAnswer.
 7. If the QUESTION itself fails check 5, rewrite it as correctedQuestion (same skill, topic and difficulty, one verifiable answer) and give its correctedAnswer. Never answer an ambiguous question with "not specified" or "it depends" — rewrite the question instead. Never rewrite a question into one about layout or position on the page (e.g. "Is X shown at the top of the column?").
 8. The picture is drawn from each page's imageSpec and printed on the student page, so a question may only quote or name what the imageSpec prints. If you rewrite a question or change an answer so that it depends on a quote, label, name or number that the imageSpec does not contain, ALSO return the page's complete corrected imageSpec in imageSpecCorrections. On matching pages every left-column item must have its correct match in the right column (e.g. if a quote's speaker is not among the listed figures, replace the quote in the imageSpec and the question together).
@@ -287,16 +329,38 @@ Call the validate_content function with your assessment.`
   return res.args ?? null
 }
 
+/**
+ * Recheck a chunk; if the call fails (a 5-page chunk once hit HTTP 413 and shipped
+ * unchecked), retry each half on its own. Returns { validation, unchecked } where
+ * `unchecked` lists the page numbers no call managed to check. `check` is injectable
+ * for tests.
+ */
+export async function recheckWithSplit(plan, pages, check = recheckPages) {
+  const validation = await check(plan, pages)
+  if (validation) return { validation, unchecked: [] }
+  if (pages.length < 2) {
+    // Groq's 400 tool_use_failed is sporadic — a single page gets one more try.
+    const again = await check(plan, pages)
+    return again ? { validation: again, unchecked: [] } : { validation: null, unchecked: pages.map(p => p.pageNum) }
+  }
+  const mid = Math.ceil(pages.length / 2)
+  const halves = await Promise.all([pages.slice(0, mid), pages.slice(mid)].map(h => recheckWithSplit(plan, h, check)))
+  return {
+    validation: halves.some(h => h.validation) ? mergeValidations(halves.map(h => h.validation)) : null,
+    unchecked: halves.flatMap(h => h.unchecked),
+  }
+}
+
 export async function validateAndCorrect(plan, contentData) {
   const groups = chunk(contentData.pages, RECHECK_PAGES_PER_CALL)
-  const results = await mapWithConcurrency(groups, RECHECK_CONCURRENCY, g => recheckPages(plan, g))
+  const results = await mapWithConcurrency(groups, RECHECK_CONCURRENCY, g => recheckWithSplit(plan, g))
 
-  const unchecked = groups.filter((_, i) => !results[i]).flat().map(p => p.pageNum)
+  const unchecked = results.flatMap(r => r.unchecked)
   if (unchecked.length > 0) {
     addReviewNote('fallback', `Q&A recheck failed for page(s) ${unchecked.join(', ')} — their answers were NOT double-checked`)
   }
   if (unchecked.length === contentData.pages.length) return contentData
-  return applyRecheck(contentData, mergeValidations(results))
+  return applyRecheck(contentData, mergeValidations(results.map(r => r.validation)))
 }
 
 /**
@@ -422,13 +486,15 @@ export async function generateContent(plan) {
       throw new Error(`Q&A generation failed after ${MAX_RETRIES + 1} attempts — see "generateContent" warnings above`)
     }
 
+    const repairNotes = repairCharts(candidate)
     const issues = validateSchema(candidate, contentPages, plan.packageType)
-    if (!best || issues.length < best.issues.length) best = { data: candidate, issues }
+    if (!best || issues.length < best.issues.length) best = { data: candidate, issues, repairNotes }
     if (issues.length === 0) break
     console.warn(`generateContent schema (attempt ${attempt}/${MAX_RETRIES + 1}): ${issues.join(', ')}`)
   }
 
   contentData = best.data
+  best.repairNotes.forEach(m => addReviewNote('chart_repaired', m))
   if (best.issues.length > 0) {
     // A blank answer prints as a blank line in the answer key, so it is never shippable.
     const blank = best.issues.filter(isEmptyAnswerIssue)
