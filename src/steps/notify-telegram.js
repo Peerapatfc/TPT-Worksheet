@@ -43,6 +43,24 @@ export async function notifyTelegram(plan, coverBuffer, folderLink, reviewText) 
 }
 
 /**
+ * Plain-text note that today's run was skipped by the market check. Goes to
+ * TELEGRAM_REVIEW_CHAT_ID when set (not the public channel).
+ */
+export async function notifySkip(text) {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: process.env.TELEGRAM_REVIEW_CHAT_ID || process.env.TELEGRAM_CHANNEL_ID,
+      text,
+      disable_web_page_preview: true,
+    }),
+  })
+  if (!res.ok) throw new Error(`Telegram skip sendMessage failed: ${res.status} ${await res.text()}`)
+}
+
+/**
  * Build the Telegram channel caption in MarkdownV2. All dynamic values and literal
  * special characters are escaped per the V2 spec. Exported for unit testing.
  */
