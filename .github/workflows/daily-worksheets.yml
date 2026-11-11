@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Skip the market check and generate regardless'
+        type: boolean
+        default: true
 
 jobs:
   generate:
@@ -47,6 +52,8 @@ jobs:
           FREE_WORKSHEET_DAY:          ${{ vars.FREE_WORKSHEET_DAY }}
           LARGE_PACKAGE_DAY:           ${{ vars.LARGE_PACKAGE_DAY }}
           PAGE_CONCURRENCY:            ${{ vars.PAGE_CONCURRENCY }}
+          MARKET_CHECK:                ${{ vars.MARKET_CHECK }}
+          FORCE_GENERATE:              ${{ github.event.inputs.force }}
 
       - name: Upload logs
         if: always()

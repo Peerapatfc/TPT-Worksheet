@@ -4,7 +4,8 @@ import { generatePages } from './steps/generate-pages.js'
 import { generateMarketingSlides } from './steps/generate-marketing-slides.js'
 import { convertPdfs } from './steps/convert-pdf.js'
 import { uploadDrive, checkGoogleToken } from './steps/upload-drive.js'
-import { notifyTelegram } from './steps/notify-telegram.js'
+import { notifyTelegram, notifySkip } from './steps/notify-telegram.js'
+import { marketCheck, isMarketCheckEnabled } from './steps/market-check.js'
 import { readTopicHistory, saveTopicEntry } from './steps/topic-history.js'
 import { appendLog } from './lib/logger.js'
 import { getPackageType } from './lib/package-type.js'
@@ -38,6 +39,21 @@ async function runSteps() {
 
   const history = await readTopicHistory()
   appendLog({ step: 'load_history', status: 'ok', count: history.length })
+
+  if (isMarketCheckEnabled()) {
+    const decision = await marketCheck({ date: runDate, packageType, history })
+    appendLog({ step: 'market_check', status: decision.generate ? 'ok' : 'skip', checked: decision.checked, reason: decision.reason, evidence: decision.evidence })
+    if (!decision.generate) {
+      // Non-essential: a failed notification must not fail a deliberately skipped run.
+      try {
+        await notifySkip(`⏭️ Skipped today's worksheet (market check)\n${decision.reason}${decision.evidence.length ? `\n\n${decision.evidence.map(e => `• ${e}`).join('\n')}` : ''}`)
+      } catch (err) {
+        console.warn(`Telegram skip notice failed — continuing: ${err.message}`)
+      }
+      appendLog({ step: 'done', status: 'skipped', durationMs: Date.now() - start })
+      return
+    }
+  }
 
   const currentMonth = new Date().toLocaleString('en-US', { month: 'long' })
   const plan = await brainstorm(

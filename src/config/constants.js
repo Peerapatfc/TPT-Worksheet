@@ -6,6 +6,7 @@
  * NOTE: content generation runs on Groq (Llama), not OpenAI — see src/llm/clients.js.
  */
 export const MODELS = {
+  marketCheck: 'openai/gpt-oss-120b', // Groq + built-in browser_search (free tier): "generate today?" gate
   brainstorm: 'gpt-4o', // OpenAI
   content: 'openai/gpt-oss-120b', // Groq (llama-3.3-70b-versatile was retired 2026-08-16)
   validate: 'gpt-4o-mini', // OpenAI vision
