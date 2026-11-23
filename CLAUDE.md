@@ -8,7 +8,7 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 
 | Layer | Tool |
 |-------|------|
-| Brainstorm (topic + plan) | gpt-4o (`openai`) |
+| Brainstorm (topic + plan) | gpt-4o (`openai`) — or openai/gpt-oss-120b on Groq with `BRAINSTORM_PROVIDER=groq` |
 | Content generation + Q&A recheck | openai/gpt-oss-120b (Groq, OpenAI-compatible) |
 | Page QA (vision) + answer reconcile | gpt-4o-mini (`openai`) |
 | Image generation | gpt-image-2 (`openai`) |
@@ -27,6 +27,7 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 - **OAuth2 not service account** — personal Google Drive accounts have no service account storage quota. Uses `GOOGLE_OAUTH_REFRESH_TOKEN` instead.
 - **Layered module layout** — library code lives under `src/` (`config/`, `llm/`, `lib/`, `steps/`); `scripts/` holds only thin entry points (`pipeline.js`, `test-plan.js`, `create-issue.js`) plus local-only helpers. CI still invokes `node scripts/pipeline.js`, so entry-point paths are stable.
 - **Two LLM providers** — text brainstorm + vision QA run on OpenAI; Q&A content generation + recheck run on **Groq** (`openai/gpt-oss-120b`; `llama-3.3-70b-versatile` was retired 2026-08-16) via the OpenAI-compatible endpoint. Clients are lazy singletons in `src/llm/clients.js` (`openai()`, `groq()`).
+- **Brainstorm provider is switchable** — `BRAINSTORM_PROVIDER=groq` runs brainstorm on Groq `openai/gpt-oss-120b` (free tier, `MODELS.brainstormGroq`) instead of OpenAI gpt-4o; unset/`openai` is the default and unknown values fall back to openai with a warning (`resolveBrainstormProvider`, `src/lib/brainstorm-provider.js`). Same prompt, schema, forced tool call and `validate()` retry loop; Groq gets `max_tokens` 16000 because gpt-oss reasoning tokens count toward it, and retries echo only `role/content/tool_calls` (not Groq's `reasoning` field). Cost is recorded under whichever model ran. Compare `npm run test:plan` (and `npm run eval`) on both providers before switching CI.
 - **Forced tool call for structured JSON** — `tool_choice: {type:'function', function:{name:'...'}}` reliably forces structured output. The single-shot pattern is wrapped in `src/llm/tool-call.js` (`callTool`); brainstorm keeps a bespoke multi-turn validation-retry loop. Parse with `JSON.parse(toolCall.function.arguments)`.
 - **Shared retry** — `src/llm/with-retry.js` (`withRetry`) retries 429/500/503 with exponential backoff. One implementation, used by every API call site.
 - **gpt-image-2** — DALL-E 3 was retired March 2026. gpt-image-2 does not accept `response_format` param; always returns b64_json.
@@ -84,6 +85,7 @@ src/
     chart-page.js         code-drawn chart pages: pictograph / bar / table + questions
     spec-consistency.js   quotesMissingFromSpec — quotes in questions must appear in the imageSpec
     cost-tracker.js       per-step token usage + USD estimate (logged at run end)
+    brainstorm-provider.js  BRAINSTORM_PROVIDER → { provider, model, maxTokens, getClient }
   steps/
     brainstorm.js         gpt-4o: topic + full page plan (exports validate)
     generate-content.js   Groq: Q&A per page (exports validateSchema)
@@ -105,7 +107,8 @@ eval/                     live eval cases (cases.json) + fixture images from rea
 | Variable | Used by |
 |----------|---------|
 | `OPENAI_API_KEY` | brainstorm, generate-pages, validate-page, reconcile-content, generate-marketing-slides |
-| `GROQ_API_KEY` | generate-content (content + Q&A recheck) |
+| `GROQ_API_KEY` | generate-content (content + Q&A recheck), market-check, brainstorm when `BRAINSTORM_PROVIDER=groq` |
+| `BRAINSTORM_PROVIDER` | brainstorm — `openai` (default/unset, gpt-4o) or `groq` (openai/gpt-oss-120b, free); unknown → openai + warning |
 | `GOOGLE_DRIVE_FOLDER_ID` | upload-drive (full assets folder) |
 | `GOOGLE_DRIVE_TPT_FOLDER_ID` | upload-drive (TPT folder — color set + preview PDFs in a per-run subfolder, optional) |
 | `GOOGLE_OAUTH_CLIENT_ID` | upload-drive, get-refresh-token |

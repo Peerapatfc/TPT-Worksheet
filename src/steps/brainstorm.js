@@ -1,7 +1,7 @@
-import { openai } from '../llm/clients.js'
+import { resolveBrainstormProvider } from '../lib/brainstorm-provider.js'
 import { withRetry } from '../llm/with-retry.js'
 import { recordUsage } from '../lib/cost-tracker.js'
-import { MODELS, PAGE_RANGES } from '../config/constants.js'
+import { PAGE_RANGES } from '../config/constants.js'
 import { TPT_SUBJECT_AREAS, TPT_TAGS } from '../config/tpt-taxonomy.js'
 import { worksheetPlanTool } from './schema/worksheet-plan.js'
 
@@ -106,8 +106,10 @@ export function syncListingCounts(plan) {
 /**
  * Pick a topic and plan a full worksheet set in a single forced tool call.
  * Retries up to MAX_RETRIES times, feeding validation errors back to the model.
+ * Provider/model come from BRAINSTORM_PROVIDER (see brainstorm-provider.js);
+ * `deps.client` / `deps.env` are injectable for tests.
  */
-export async function brainstorm(gradeLevel, maxPages, history = [], packageType = 'small', currentMonth = '') {
+export async function brainstorm(gradeLevel, maxPages, history = [], packageType = 'small', currentMonth = '', deps = {}) {
   const historyBlock =
     history.length > 0
       ? `\nPREVIOUSLY GENERATED TOPICS — do NOT repeat or create anything similar in subject, title, or keywords:\n${history
@@ -239,21 +241,23 @@ Call the generate_worksheet_plan function with the complete plan.`
   const MAX_RETRIES = 3
   let plan = null
   const messages = [{ role: 'user', content: prompt }]
-  const client = openai()
+  const llm = resolveBrainstormProvider(deps.env ?? process.env)
+  const client = deps.client ?? llm.getClient()
+  console.log(`brainstorm: provider=${llm.provider} model=${llm.model}`)
 
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
     const result = await withRetry(() => client.chat.completions.create({
-      model: MODELS.brainstorm,
-      max_tokens: 4000,
+      model: llm.model,
+      max_tokens: llm.maxTokens,
       tools: [worksheetPlanTool],
       tool_choice: { type: 'function', function: { name: 'generate_worksheet_plan' } },
       messages,
-    }), { label: 'OpenAI brainstorm' })
-    recordUsage('brainstorm', MODELS.brainstorm, result.usage)
+    }), { label: llm.label })
+    recordUsage('brainstorm', llm.model, result.usage)
 
     const assistantMsg = result.choices[0].message
     const toolCall = assistantMsg.tool_calls?.[0]
-    if (!toolCall) throw new Error('OpenAI did not return a tool call for generate_worksheet_plan')
+    if (!toolCall) throw new Error(`${llm.provider} did not return a tool call for generate_worksheet_plan`)
 
     // Answer-key structure is derived in code, so a miscounted set never costs a retry.
     const candidate = normalizeAnswerKeys(JSON.parse(toolCall.function.arguments))
@@ -263,7 +267,8 @@ Call the generate_worksheet_plan function with the complete plan.`
     } catch (err) {
       if (attempt <= MAX_RETRIES) {
         console.warn(`brainstorm validation (attempt ${attempt}/${MAX_RETRIES + 1}): ${err.message} — retrying`)
-        messages.push(assistantMsg)
+        // Only the standard fields: Groq returns a non-standard `reasoning` field on the message.
+        messages.push({ role: 'assistant', content: assistantMsg.content ?? null, tool_calls: assistantMsg.tool_calls })
         messages.push({
           role: 'tool',
           tool_call_id: toolCall.id,
