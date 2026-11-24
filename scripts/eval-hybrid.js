@@ -1,7 +1,9 @@
 // Live Groq-only eval of the hybrid content step (PAGE_RENDERER=hybrid): runs the
 // structured content generation on the realistic plans in eval/hybrid-plans.js and
 // reports, per layout, how often the first attempt validates, retries, picture-
-// dependence rejections, fallbacks, tokens per call, 429/400 counts and wall time.
+// dependence rejections, matching/sorting ambiguity rejects (code checks + the
+// matching self-check, MATCHING_SELF_CHECK=off to skip), fallbacks, tokens per call,
+// 429/400 counts and wall time.
 // Free (Groq free tier) — but mind the daily token budget: 200k tokens/day (TPD) for
 // gpt-oss-120b, shared with the daily pipeline. One call is ~2.8k tokens and a run
 // ~2–3 calls, so the default 6 plans × 3 runs needs ~120k; use EVAL_RUNS=1 first.
@@ -30,8 +32,9 @@ console.warn = (...a) => { if (/\b429\b/.test(String(a[0]))) status429++; warn(.
 const log = console.log
 console.log = () => {}
 
+const AMBIGUOUS = /^ambiguous:|several items share|have the same match|contains the term itself|each word must fit exactly one category/
 const byLayout = new Map()
-const row = (l) => { if (!byLayout.has(l)) byLayout.set(l, { pages: 0, first: 0, retried: 0, fallbackQ: 0, legacy: 0, picture: 0, suggested: 0 }); return byLayout.get(l) }
+const row = (l) => { if (!byLayout.has(l)) byLayout.set(l, { pages: 0, first: 0, retried: 0, fallbackQ: 0, legacy: 0, picture: 0, ambiguous: 0, suggested: 0 }); return byLayout.get(l) }
 const calls = []
 const t0 = Date.now()
 
@@ -54,6 +57,7 @@ for (const pi of planIdx) {
       if (tries[0] && tries[0].issues.length === 0) st.first++
       else st.retried++
       if (tries.some(t => t.issues.some(i => /depends on the picture/.test(i)))) st.picture++
+      if (tries.some(t => t.issues.some(i => AMBIGUOUS.test(i)))) st.ambiguous++
       if (pages.get(p.pageNum)?.fallback) st.fallbackQ++
       if (failed.some(f => f.pageNum === p.pageNum)) st.legacy++
       for (const t of tries) if (t.issues.length) warn(`  [${plan.setTitle} r${r + 1}] p${p.pageNum} ${t.layout} attempt ${t.attempt}: ${t.issues.join('; ').slice(0, 300)}`)
@@ -64,16 +68,18 @@ for (const pi of planIdx) {
 }
 
 const pct = (a, b) => (b ? `${Math.round((100 * a) / b)}%` : '–')
-log('\nlayout (first attempt) | pages | first-pass valid | retried | picture-dep. rejects | → questions fallback | → legacy | = suggested')
-let tot = { pages: 0, first: 0, retried: 0, fallbackQ: 0, legacy: 0, picture: 0 }
+log('\nlayout (first attempt) | pages | first-pass valid | retried | picture-dep. rejects | ambiguity rejects | → questions fallback | → legacy | = suggested')
+let tot = { pages: 0, first: 0, retried: 0, fallbackQ: 0, legacy: 0, picture: 0, ambiguous: 0 }
 for (const [l, st] of [...byLayout].sort()) {
-  log(`${l.padEnd(16)} | ${String(st.pages).padStart(3)} | ${pct(st.first, st.pages).padStart(4)} | ${String(st.retried).padStart(3)} | ${String(st.picture).padStart(3)} | ${String(st.fallbackQ).padStart(3)} | ${String(st.legacy).padStart(3)} | ${pct(st.suggested, st.pages)}`)
+  log(`${l.padEnd(16)} | ${String(st.pages).padStart(3)} | ${pct(st.first, st.pages).padStart(4)} | ${String(st.retried).padStart(3)} | ${String(st.picture).padStart(3)} | ${String(st.ambiguous).padStart(3)} | ${String(st.fallbackQ).padStart(3)} | ${String(st.legacy).padStart(3)} | ${pct(st.suggested, st.pages)}`)
   for (const k of Object.keys(tot)) tot[k] += st[k]
 }
-log(`TOTAL            | ${tot.pages} | ${pct(tot.first, tot.pages)} | ${tot.retried} | ${tot.picture} | ${tot.fallbackQ} | ${tot.legacy}`)
-const ok = calls.filter(c => c.usage)
+log(`TOTAL            | ${tot.pages} | ${pct(tot.first, tot.pages)} | ${tot.retried} | ${tot.picture} | ${tot.ambiguous} | ${tot.fallbackQ} | ${tot.legacy}`)
+const checks = calls.filter(c => c.kind === 'matching_check')
+const ok = calls.filter(c => c.usage && !c.kind)
 const avg = (f) => (ok.length ? Math.round(ok.reduce((s, c) => s + f(c), 0) / ok.length) : 0)
 const errors = calls.filter(c => c.error)
 log(`\ncalls ${calls.length} (failed ${errors.length}: ${errors.map(e => `${e.error}${e.code ? `/${e.code}` : ''}`).join(', ') || 'none'}), 429 retries ${status429}`)
 log(`tokens/call avg: prompt ${avg(c => c.usage.prompt_tokens)}, completion ${avg(c => c.usage.completion_tokens)}, total ${avg(c => c.usage.total_tokens)}; max total ${Math.max(0, ...ok.map(c => c.usage.total_tokens))}`)
+if (checks.length) { const u = checks.filter(c => c.usage); log(`matching self-checks ${checks.length} (failed ${checks.length - u.length}), tokens/check avg ${u.length ? Math.round(u.reduce((s, c) => s + c.usage.total_tokens, 0) / u.length) : 0}`) }
 log(`wall time ${((Date.now() - t0) / 1000).toFixed(0)}s for ${planIdx.length} plan(s) × ${RUNS} run(s)`)
