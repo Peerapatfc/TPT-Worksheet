@@ -1,53 +1,36 @@
 // Text measurement for code-rendered pages. librsvg (via sharp) has no measuring
-// API, so widths come from a DejaVu Sans advance-width table — the font CI
-// (ubuntu-latest) renders with. Every estimate errs wide (bold model, unknown
-// glyphs at ≥ 1 em, SAFETY factor), so text measured to fit never overflows when
-// the renderer falls back to a narrower font (Helvetica/Arial locally). Pure.
+// API, so widths come from the advance widths of the bundled Nunito TTFs
+// (src/lib/fonts.js) — the exact font every page is rendered with, on CI and
+// locally. Glyphs Nunito lacks (Thai, emoji, …) are drawn by a system fallback
+// font and measured with a wide guess (≥ 1 em). Kerning is ignored (it only
+// narrows Nunito text), plus a small SAFETY margin. Pure apart from reading the
+// font files once.
+import { fontMetrics } from '../fonts.js'
 
-// DejaVu Sans regular advance widths, units per em = 2048, ASCII 32–126.
-const ASCII = [
-  651, 821, 942, 1716, 1303, 1946, 1597, 563, 799, 799, 1024, 1716, 651, 739, 651, 690, // ' '…'/'
-  1303, 1303, 1303, 1303, 1303, 1303, 1303, 1303, 1303, 1303, // 0-9
-  690, 690, 1716, 1716, 1716, 1087, 2048, // : ; < = > ? @
-  1401, 1405, 1430, 1577, 1294, 1178, 1587, 1540, 604, 604, 1343, 1141, 1767, 1532, 1612, 1235, 1612, 1423, 1300, 1251, 1499, 1401, 2025, 1403, 1251, 1403, // A-Z
-  799, 690, 799, 1716, 1024, 1024, // [ \ ] ^ _ `
-  1255, 1300, 1126, 1300, 1260, 721, 1300, 1298, 569, 569, 1186, 569, 1995, 1298, 1253, 1300, 1300, 842, 1067, 803, 1298, 1212, 1675, 1212, 1212, 1075, // a-z
-  1303, 690, 1303, 1716, // { | } ~
-]
-const EXTRA = {
-  '‘': 651, '’': 651, '“': 1060, '”': 1060, '–': 1024, '—': 2048,
-  '•': 1208, '…': 2048, ' ': 651, '×': 1716, '÷': 1716, '°': 1024,
-  '‑': 739, '‐': 739, '−': 1716,
-}
-const UNITS = 2048
-const UNKNOWN_EM = 1.0 // other BMP scripts (Thai, CJK, symbols): wide guess
+const UNKNOWN_EM = 1.0 // other BMP scripts (Thai, CJK, symbols) from a fallback font: wide guess
 const ASTRAL_EM = 1.3 // emoji and other astral-plane glyphs
-// DejaVu Sans Bold ≈ regular × 1.08 + 0.055 em (narrow glyphs like i/l/t grow the most).
-const BOLD_MUL = 1.08
-const BOLD_ADD = 0.055
-export const SAFETY = 1.04
+export const SAFETY = 1.02
 
-/** Advance width of one code point in em (regular weight). */
-function regularEm(ch) {
+/** Advance width of one code point in em for a parsed font. */
+function charEm(font, ch) {
   const cp = ch.codePointAt(0)
-  if (cp >= 32 && cp <= 126) return ASCII[cp - 32] / UNITS
-  if (EXTRA[ch]) return EXTRA[ch] / UNITS
   if (cp < 32) return 0
-  if (cp > 0xffff) return ASTRAL_EM
-  // Accented Latin: measure the base letter (é → e), keeping the wide default otherwise.
-  const base = ch.normalize('NFD')[0]
-  if (base !== ch && base.codePointAt(0) >= 32 && base.codePointAt(0) <= 126) return ASCII[base.codePointAt(0) - 32] / UNITS
+  const adv = font.advance(cp)
+  if (adv !== undefined) return adv / font.unitsPerEm
   if (cp >= 0x300 && cp <= 0x36f) return 0 // combining marks
-  return UNKNOWN_EM
+  // Accented Latin the font lacks: measure the base letter (é → e) if it has it.
+  const base = ch.normalize('NFD')[0]
+  const baseAdv = base !== ch ? font.advance(base.codePointAt(0)) : undefined
+  if (baseAdv !== undefined) return baseAdv / font.unitsPerEm
+  return cp > 0xffff ? ASTRAL_EM : UNKNOWN_EM
 }
 
-/** Width in px of `str` at `size` px. Pure. */
-export function measureText(str, size, { bold = false } = {}) {
+/** Width in px of `str` at `size` px in the bundled font. Pure. */
+export function measureText(str, size, { bold = false, italic = false } = {}) {
+  const m = fontMetrics()
+  const font = bold ? m.bold : italic ? m.italic : m.regular
   let em = 0
-  for (const ch of String(str ?? '')) {
-    const r = regularEm(ch)
-    em += bold && r > 0 ? r * BOLD_MUL + BOLD_ADD : r
-  }
+  for (const ch of String(str ?? '')) em += charEm(font, ch)
   return em * size * SAFETY
 }
 
@@ -59,11 +42,11 @@ export const cleanText = (s) => String(s ?? '')
   .replace(/[\t\r\n]+/g, ' ')
 
 /** Split a word wider than maxWidth into pieces that each fit (at least one char per piece). */
-function hardSplit(word, maxWidth, size, bold) {
+function hardSplit(word, maxWidth, size, f) {
   const parts = []
   let cur = ''
   for (const ch of word) {
-    if (cur && measureText(cur + ch, size, { bold }) > maxWidth) { parts.push(cur); cur = ch } else cur += ch
+    if (cur && measureText(cur + ch, size, f) > maxWidth) { parts.push(cur); cur = ch } else cur += ch
   }
   if (cur) parts.push(cur)
   return parts
@@ -75,8 +58,9 @@ function hardSplit(word, maxWidth, size, bold) {
  * `{ text?, blank?, x, w }` with each line's total width ≤ maxWidth, except a
  * single blank wider than the line (never produced by callers). Pure.
  */
-export function wrapTokens(tokens, maxWidth, size, { bold = false } = {}) {
-  const space = measureText(' ', size, { bold })
+export function wrapTokens(tokens, maxWidth, size, { bold = false, italic = false } = {}) {
+  const f = { bold, italic }
+  const space = measureText(' ', size, f)
   const lines = []
   let line = []
   let x = 0
@@ -88,9 +72,9 @@ export function wrapTokens(tokens, maxWidth, size, { bold = false } = {}) {
   }
   for (const t of tokens) {
     if (typeof t === 'object' && t.blank) { push({ blank: true }, t.blank); continue }
-    const w = measureText(t, size, { bold })
+    const w = measureText(t, size, f)
     if (w <= maxWidth) { push({ text: t }, w); continue }
-    for (const piece of hardSplit(t, maxWidth, size, bold)) push({ text: piece }, measureText(piece, size, { bold }))
+    for (const piece of hardSplit(t, maxWidth, size, f)) push({ text: piece }, measureText(piece, size, f))
   }
   if (line.length) lines.push(line)
   return lines
@@ -121,9 +105,9 @@ export function glueMath(words) {
 }
 
 /** Word-wrap plain text into lines (strings) that each measure ≤ maxWidth. Pure. */
-export function wrapText(str, maxWidth, size, { bold = false } = {}) {
+export function wrapText(str, maxWidth, size, { bold = false, italic = false } = {}) {
   const words = glueMath(cleanText(str).split(/\s+/).filter(Boolean))
-  const lines = wrapTokens(words, maxWidth, size, { bold }).map(l => l.map(t => t.text).join(' '))
+  const lines = wrapTokens(words, maxWidth, size, { bold, italic }).map(l => l.map(t => t.text).join(' '))
   return lines.length ? lines : ['']
 }
 
@@ -137,9 +121,9 @@ export class LayoutOverflowError extends Error {
  * ≤ width px. Throws LayoutOverflowError if it cannot fit at `min`. Pure.
  * @returns {{ size: number, lines: string[] }}
  */
-export function fitText(str, { width, maxLines = Infinity, max, min, step = 1, bold = false }) {
+export function fitText(str, { width, maxLines = Infinity, max, min, step = 1, bold = false, italic = false }) {
   for (let size = max; size >= min; size -= step) {
-    const lines = wrapText(str, width, size, { bold })
+    const lines = wrapText(str, width, size, { bold, italic })
     if (lines.length <= maxLines) return { size, lines }
   }
   throw new LayoutOverflowError(`text does not fit ${maxLines} line(s) of ${width}px at ${min}px: "${String(str).slice(0, 40)}…"`)
@@ -149,10 +133,10 @@ export function fitText(str, { width, maxLines = Infinity, max, min, step = 1, b
  * Single-line fit that never throws: shrinks to `min`, then truncates with "…".
  * Only for decorative/header text (never for questions or answers). Pure.
  */
-export function fitLine(str, { width, max, min, bold = false }) {
+export function fitLine(str, { width, max, min, bold = false, italic = false }) {
   const s = cleanText(str).trim()
-  for (let size = max; size >= min; size--) if (measureText(s, size, { bold }) <= width) return { size, text: s }
+  for (let size = max; size >= min; size--) if (measureText(s, size, { bold, italic }) <= width) return { size, text: s }
   let cut = s
-  while (cut && measureText(`${cut}…`, min, { bold }) > width) cut = [...cut].slice(0, -1).join('')
+  while (cut && measureText(`${cut}…`, min, { bold, italic }) > width) cut = [...cut].slice(0, -1).join('')
   return { size: min, text: `${cut.trimEnd()}…` }
 }

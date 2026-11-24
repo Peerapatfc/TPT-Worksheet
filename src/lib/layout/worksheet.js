@@ -67,12 +67,12 @@ ${motifCluster(motifName, PAGE_W - 112, PAGE_H - 112, 86, 86, pal, true)}`
 /** Instruction line(s) under the name pill; returns the y where content starts. */
 function instruction(textStr) {
   const width = CONTENT.right - CONTENT.left
-  const { size, lines } = fitText(textStr, { width, maxLines: 2, max: 26, min: 16 })
+  const { size, lines } = fitText(textStr, { width, maxLines: 2, max: 26, min: 16, italic: true })
   const lh = size * 1.3
   const boxes = []
   const svg = lines.map((l, i) => {
     const base = INSTR_TOP + size + i * lh
-    boxes.push(textBox(CONTENT.left, base, measureText(l, size), size))
+    boxes.push(textBox(CONTENT.left, base, measureText(l, size, { italic: true }), size))
     return textEl(CONTENT.left, base, l, { size, fill: '#444', style: 'italic' })
   }).join('')
   return { svg, boxes, bottom: INSTR_TOP + size + (lines.length - 1) * lh + DESC * size + 26 }

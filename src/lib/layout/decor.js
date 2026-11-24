@@ -3,8 +3,9 @@
 // Everything is a pure SVG string; text is XML-escaped by the caller via `textEl`.
 import { escapeXml, safeColor, tint } from '../svg-templates.js'
 import { cleanText } from './measure.js'
+import { FONT_STACK } from '../fonts.js'
 
-export const FONT = 'DejaVu Sans, Helvetica, Arial, sans-serif'
+export const FONT = FONT_STACK
 
 /** <text> element with escaped, XML-safe content. */
 export const textEl = (x, y, content, { size, weight = 'normal', fill = '#222', anchor = 'start', style = 'normal' }) =>

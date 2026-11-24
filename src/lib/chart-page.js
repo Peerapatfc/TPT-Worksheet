@@ -3,7 +3,7 @@
 // QA/reconcile models can't count them either (they echo the spec), so pages
 // whose questions read chart data are rendered from structured data instead.
 // The answer key is built from the same numbers, so it always matches the page.
-import { PAGE_W, pageSvg, text, wrapText, escapeXml, safeColor } from './svg-templates.js'
+import { PAGE_W, pageSvg, text, wrapText, escapeXml, safeColor, FONT } from './svg-templates.js'
 
 export const CHART_TYPES = ['pictograph', 'bar', 'table']
 export const CHART_ICONS = ['circle', 'star', 'square', 'heart', 'triangle']
@@ -127,7 +127,7 @@ function bar(chart, color, x0, y0, x1, y1) {
     out += text(axisX - 12, y + 8, String(v), { size: 22, fill: LABEL_COLOR, anchor: 'end' })
   }
   if (chart.unit) {
-    out += `<text x="${x0 + 14}" y="${(topY + baseY) / 2}" font-family="DejaVu Sans, Helvetica, Arial, sans-serif" font-size="22" font-weight="bold" fill="${LABEL_COLOR}" text-anchor="middle" transform="rotate(-90 ${x0 + 14} ${(topY + baseY) / 2})">${escapeXml(`Number of ${chart.unit}`)}</text>`
+    out += `<text x="${x0 + 14}" y="${(topY + baseY) / 2}" font-family="${FONT}" font-size="22" font-weight="bold" fill="${LABEL_COLOR}" text-anchor="middle" transform="rotate(-90 ${x0 + 14} ${(topY + baseY) / 2})">${escapeXml(`Number of ${chart.unit}`)}</text>`
   }
   const slot = (x1 - axisX) / n
   const barW = Math.min(110, slot * 0.6)

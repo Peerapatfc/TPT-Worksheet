@@ -4,8 +4,9 @@
 // printed answers match the Q&A data exactly.
 import sharp from 'sharp'
 import { resolveSourceQuestions } from './source-pages.js'
+import { FONT_STACK } from './fonts.js' // also points fontconfig at the bundled font before any render
 
-const FONT = 'DejaVu Sans, Helvetica, Arial, sans-serif'
+export const FONT = FONT_STACK
 const DEFAULT_COLOR = '#1B4F8A'
 const GRAY = '#555555'
 
@@ -23,7 +24,8 @@ export const escapeXml = (s) => String(s ?? '')
   .replace(/'/g, '&apos;')
 
 /**
- * Greedy word wrap using an average-glyph-width estimate (no font metrics in Node).
+ * Greedy word wrap using a conservative average-glyph-width estimate (wider than
+ * Nunito, so lines never overflow; hybrid layouts use exact widths, layout/measure.js).
  * Words longer than a line are hard-split.
  */
 export function wrapText(text, maxWidth, fontSize, bold = false) {
@@ -141,7 +143,8 @@ ${body}
 </svg>`
 }
 
-// Average glyph width of DejaVu Sans Bold in em — the font the CI renderer falls back to.
+// Conservative average bold glyph width in em (Nunito Bold averages ≈ 0.5 em), so
+// text sized with it always fits. Hybrid layouts measure exactly (layout/measure.js).
 const BOLD_EM = 0.66
 
 /**
