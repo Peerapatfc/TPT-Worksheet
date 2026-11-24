@@ -49,6 +49,16 @@ export function buildPageIllustrationPrompt(subject) {
   return `${head}${s}${tail}`
 }
 
+export const COLORING_STYLE = "black and white colouring page for children, thick clean black outlines, simple shapes, no shading, no grey, no colour fill, plain white background"
+
+/** FLUX prompt for a full-page colouring (line-art) illustration (activity_art). Pure. */
+export function buildColoringPrompt(subject) {
+  const head = `${COLORING_STYLE}, single subject filling the frame, no frame, no border, ${NO_TEXT}. `
+  const tail = `. ${NO_TEXT}`
+  const s = String(subject ?? '').replace(/[.\s]+$/, '').slice(0, MAX_PROMPT_CHARS - head.length - tail.length)
+  return `${head}${s}${tail}`
+}
+
 const promptKey = (p) => String(p).toLowerCase().replace(/\s+/g, ' ').trim()
 
 /**

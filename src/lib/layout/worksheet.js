@@ -14,20 +14,21 @@ import { measureText, wrapText, wrapTokens, fitText, fitLine, cleanText, LayoutO
 import { textEl, palette, themeMotif, motifCluster, motifBlock, numberBadge, answerBox, answerLine, illustrationEl, r1 } from './decor.js'
 
 export const CONTENT = { left: 118, right: 906, bottom: 1474 }
-const ASC = 0.93
-const DESC = 0.25
+export const ASC = 0.93
+export const DESC = 0.25
 const INSTR_TOP = 248
 const FLOAT = { w: 270, h: 270, gap: 24, maxLines: 3 }
 const ART = { min: 250, minSmall: 170, max: 520, maxW: 700, gap: 26 }
 const ART_MIN_FONT = 20
+const COL_GAP = 28
 
-const textBox = (x, baseline, w, s, kind = 'text') => ({ kind, x, y: baseline - ASC * s, w, h: (ASC + DESC) * s })
+export const textBox = (x, baseline, w, s, kind = 'text') => ({ kind, x, y: baseline - ASC * s, w, h: (ASC + DESC) * s })
 
 /** Page title shown in the header ("Worksheet: Addition Facts"). */
 export const pageTitle = (page) => cleanText(page.content?.title || page.title || String(page.filename ?? '').replace(/[-_]+/g, ' ')).trim()
 
 // ── Frame: background, card, header band, name/date pill, corner motifs ───────
-function frame(plan, page, pal, motifName) {
+export function frame(plan, page, pal, motifName) {
   const { c, accent, pale } = pal
   const title = fitLine(plan.setTitle ?? '', { width: 820, max: 42, min: 22, bold: true })
   const kind = page.type === 'activity' ? 'Activity' : 'Worksheet'
@@ -65,14 +66,14 @@ ${motifCluster(motifName, PAGE_W - 112, PAGE_H - 112, 86, 86, pal, true)}`
 }
 
 /** Instruction line(s) under the name pill; returns the y where content starts. */
-function instruction(textStr) {
+export function instruction(textStr, { maxLines = 2 } = {}) {
   const width = CONTENT.right - CONTENT.left
-  const { size, lines } = fitText(textStr, { width, maxLines: 2, max: 26, min: 16 })
+  const { size, lines } = fitText(textStr, { width, maxLines, max: 26, min: 16, italic: true })
   const lh = size * 1.3
   const boxes = []
   const svg = lines.map((l, i) => {
     const base = INSTR_TOP + size + i * lh
-    boxes.push(textBox(CONTENT.left, base, measureText(l, size), size))
+    boxes.push(textBox(CONTENT.left, base, measureText(l, size, { italic: true }), size))
     return textEl(CONTENT.left, base, l, { size, fill: '#444', style: 'italic' })
   }).join('')
   return { svg, boxes, bottom: INSTR_TOP + size + (lines.length - 1) * lh + DESC * size + 26 }
@@ -86,7 +87,7 @@ export const isShortAnswer = (answer) => { const a = cleanText(answer).trim(); r
 export const answerLineCount = (answer) => { const n = cleanText(answer).trim().length; return n <= 45 ? 1 : n <= 110 ? 2 : 3 }
 
 // ── Blocks: build(width) → { h, render(x, y) → { svg, boxes } } | null ────────
-function questionRow(q, s, pal, index) {
+export function questionRow(q, s, pal, index) {
   return {
     build(width) {
       const padX = s * 0.45
@@ -209,7 +210,7 @@ function sentenceRow(q, s, pal, index, bankWords) {
   }
 }
 
-function wordBankBlock(bank, s, pal) {
+export function wordBankBlock(bank, s, pal, { label = 'Word Bank' } = {}) {
   return {
     build(width) {
       const ps = Math.min(s, 30)
@@ -236,7 +237,7 @@ function wordBankBlock(bank, s, pal) {
         render(x, y) {
           let svg = `<rect x="${r1(x)}" y="${r1(y)}" width="${r1(width)}" height="${r1(h)}" rx="${r1(ps * 0.8)}" fill="${pal.pale}" stroke="${pal.accent}" stroke-width="3" stroke-dasharray="10 8"/>`
           const boxes = [{ kind: 'bank', x, y, w: width, h }]
-          svg += textEl(x + width / 2, y + pad + labelS * 0.9, 'Word Bank', { size: labelS, weight: 'bold', fill: pal.c, anchor: 'middle' })
+          svg += textEl(x + width / 2, y + pad + labelS * 0.9, label, { size: labelS, weight: 'bold', fill: pal.c, anchor: 'middle' })
           let py = y + pad + labelS * 1.2 + gapY
           for (const { row: rr, rw: w } of rows) {
             let px = x + (width - w) / 2
@@ -281,20 +282,75 @@ function flow(blocks, { top, bottom, left, right, floatSize, gap }) {
 }
 
 /**
+ * Two-column fallback: leading `span` blocks (word bank, headers) take the full
+ * width, the remaining rows are split into two equal columns at the point that
+ * balances their heights. Returns null if a block cannot be built or it does not fit.
+ */
+function flow2(blocks, { top, bottom, left, right, gap }) {
+  let y = top
+  const placed = []
+  let i = 0
+  for (; i < blocks.length && blocks[i].span; i++) {
+    const built = blocks[i].build(right - left)
+    if (!built) return null
+    placed.push({ x: left, y, width: right - left, built })
+    y += built.h + gap
+  }
+  const rest = blocks.slice(i)
+  if (rest.length < 2) return null
+  const colW = (right - left - COL_GAP) / 2
+  const built = rest.map(b => b.build(colW))
+  if (built.some(b => !b)) return null
+  const colH = (list) => list.reduce((t, b) => t + b.h, 0) + gap * Math.max(0, list.length - 1)
+  let best = null
+  for (let k = 1; k < built.length; k++) {
+    const h = Math.max(colH(built.slice(0, k)), colH(built.slice(k)))
+    if (!best || h < best.h) best = { k, h }
+  }
+  if (y + best.h > bottom) return null
+  let cy = y
+  built.forEach((b, j) => {
+    if (j === best.k) cy = y
+    placed.push({ x: j < best.k ? left : left + colW + COL_GAP, y: cy, width: colW, built: b })
+    cy += b.h + gap
+  })
+  return { placed, end: y + best.h, float: null }
+}
+
+/**
  * Try font sizes from large to small; at each size prefer the illustration in a
- * band under the content, then as a top-right float; finally drop it.
+ * band under the content, then as a top-right float; then drop it (down to
+ * `twoColumnBelow`), then — for layouts made of independent rows — two columns,
+ * then the smallest single-column sizes; finally throw LayoutOverflowError.
  * `art` is { kind: 'image', ill } | { kind: 'motif', name } | null.
  */
-function compose({ top, blocksFor, sizes, art, pal, rowGap = 0.45 }) {
+export function compose({ top, blocksFor, sizes = SIZES, art, pal, rowGap = 0.45, twoColumn = false, twoColumnBelow = 20, bandOnly = false }) {
   const area = { left: CONTENT.left, right: CONTENT.right, top, bottom: CONTENT.bottom }
   const attempts = []
-  if (art) for (const size of sizes.filter(s => s >= ART_MIN_FONT)) attempts.push({ size, mode: 'band', min: ART.min }, { size, mode: 'float' }, { size, mode: 'band', min: ART.minSmall })
-  for (const size of sizes) attempts.push({ size, mode: 'none' })
+  if (art) {
+    for (const size of sizes.filter(s => s >= ART_MIN_FONT)) {
+      attempts.push({ size, mode: 'band', min: ART.min })
+      if (!bandOnly) attempts.push({ size, mode: 'float' })
+      attempts.push({ size, mode: 'band', min: ART.minSmall })
+    }
+  }
+  for (const size of sizes.filter(s => !twoColumn || s >= twoColumnBelow)) attempts.push({ size, mode: 'none' })
+  if (twoColumn) {
+    for (const size of sizes.filter(s => s <= 26)) attempts.push({ size, mode: 'cols2' })
+    for (const size of sizes.filter(s => s < twoColumnBelow)) attempts.push({ size, mode: 'none' })
+  }
+
+  // Fast fail: if nothing fits at the smallest size, no larger attempt can.
+  const minSize = sizes[sizes.length - 1]
+  const minGap = minSize * rowGap
+  if (!flow(blocksFor(minSize), { ...area, floatSize: null, gap: minGap }) && !(twoColumn && flow2(blocksFor(minSize), { ...area, gap: minGap }))) {
+    throw new LayoutOverflowError(`content does not fit the page even at ${minSize}px without an illustration`)
+  }
 
   for (const a of attempts) {
     const blocks = blocksFor(a.size)
     const gap = a.size * rowGap
-    const res = flow(blocks, { ...area, floatSize: a.mode === 'float' ? FLOAT : null, gap })
+    const res = a.mode === 'cols2' ? flow2(blocks, { ...area, gap }) : flow(blocks, { ...area, floatSize: a.mode === 'float' ? FLOAT : null, gap })
     if (!res) continue
     const leftover = area.bottom - res.end
     if (a.mode === 'band' && leftover < a.min + ART.gap) continue
@@ -304,11 +360,11 @@ function compose({ top, blocksFor, sizes, art, pal, rowGap = 0.45 }) {
     let spare = leftover
     if (a.mode === 'band') spare = Math.max(0, leftover - ART.gap - ART.max)
     if (a.mode === 'float') spare = Math.max(0, area.bottom - Math.max(res.end, res.float.y + res.float.h))
-    const extra = n > 1 ? Math.min(spare / n, a.size * (a.mode === 'band' ? 0.7 : 0.9)) : 0
+    const extra = n > 1 && a.mode !== 'cols2' ? Math.min(spare / n, a.size * (a.mode === 'band' ? 0.7 : 0.9)) : 0
     let svg = ''
     const boxes = []
     res.placed.forEach((p, i) => {
-      const out = p.built.render(area.left, p.y + i * extra)
+      const out = p.built.render(p.x ?? area.left, p.y + i * extra)
       svg += out.svg
       boxes.push(...out.boxes)
     })
@@ -335,26 +391,35 @@ function compose({ top, blocksFor, sizes, art, pal, rowGap = 0.45 }) {
         svg += motifBlock(art.name, slot.x + (slot.w - side) / 2, slot.y + (slot.h - side) / 2, side, side, pal)
       }
     }
-    return { svg, boxes, meta: { size: a.size, art: slot ? a.mode : (art ? 'dropped' : 'none') } }
+    return { svg, boxes, meta: { size: a.size, art: slot ? a.mode : (art ? 'dropped' : 'none'), columns: a.mode === 'cols2' ? 2 : 1 } }
   }
   throw new LayoutOverflowError(`content does not fit the page even at ${sizes[sizes.length - 1]}px without an illustration`)
 }
 
-const SIZES = [32, 30, 28, 26, 24, 22, 20, 18, 16]
+export const SIZES = [32, 30, 28, 26, 24, 22, 20, 18, 16]
 
-function page(plan, pg, { art, instructionText, blocksFor }) {
+/** Frame + instruction shared by every layout: { pal, motifName, svg, boxes, top }. */
+export function shell(plan, pg, instructionText, { maxLines = 2 } = {}) {
   const pal = palette(plan.themeColor)
   const motifName = themeMotif(plan)
   const fr = frame(plan, pg, pal, motifName)
-  const ins = instruction(instructionText)
-  const artSpec = art?.ill ? { kind: 'image', ill: art.ill } : art ? { kind: 'motif', name: motifName } : null
-  const body = compose({ top: ins.bottom, blocksFor: (s) => blocksFor(s, pal), sizes: SIZES, art: artSpec, pal })
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}" viewBox="0 0 ${PAGE_W} ${PAGE_H}">
-${fr.svg}
-${ins.svg}
-${body.svg}
+  const ins = instruction(instructionText, { maxLines })
+  return { pal, motifName, svg: `${fr.svg}\n${ins.svg}`, boxes: [...fr.boxes, ...ins.boxes], top: ins.bottom }
+}
+
+/** The `art` option of a layout → compose's art spec. */
+export const artSpec = (art, motifName) => (art?.ill ? { kind: 'image', ill: art.ill } : art ? { kind: 'motif', name: motifName } : null)
+
+/** Wrap page parts into the final 1024×1536 SVG document. */
+export const pageDoc = (...parts) => `<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}" viewBox="0 0 ${PAGE_W} ${PAGE_H}">
+${parts.join('\n')}
 </svg>`
-  return { svg, boxes: [...fr.boxes, ...ins.boxes, ...body.boxes], meta: body.meta }
+
+/** Generic page: shell + composed blocks (+ spot illustration). */
+export function page(plan, pg, { art, instructionText, blocksFor, twoColumn = false, bandOnly = false }) {
+  const sh = shell(plan, pg, instructionText)
+  const body = compose({ top: sh.top, blocksFor: (s) => blocksFor(s, sh.pal), art: artSpec(art, sh.motifName), pal: sh.pal, twoColumn, bandOnly })
+  return { svg: pageDoc(sh.svg, body.svg), boxes: [...sh.boxes, ...body.boxes], meta: body.meta }
 }
 
 /**
@@ -370,6 +435,7 @@ export function questionsPageSvg(plan, pg, { art = null } = {}) {
     art,
     instructionText: allShort ? 'Read each question carefully. Write your answer in the box.' : 'Read each question carefully. Write your answer on the lines.',
     blocksFor: (s, pal) => qs.map((q, i) => questionRow(q, s, pal, i)),
+    twoColumn: true,
   })
 }
 
@@ -384,8 +450,9 @@ export function fillBlankPageSvg(plan, pg, { art = null, wordBank = [] } = {}) {
     art,
     instructionText: bank.length ? 'Use the words in the word bank to complete each sentence.' : 'Complete each sentence. Write the missing word on the line.',
     blocksFor: (s, pal) => [
-      ...(bank.length ? [{ ...wordBankBlock(bank, s, pal), floatable: false }] : []),
+      ...(bank.length ? [{ ...wordBankBlock(bank, s, pal), floatable: false, span: true }] : []),
       ...qs.map((q, i) => sentenceRow(q, s, pal, i, bank)),
     ],
+    twoColumn: true,
   })
 }

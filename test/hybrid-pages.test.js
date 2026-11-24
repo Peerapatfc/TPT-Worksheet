@@ -40,6 +40,37 @@ describe('classifyHybridLayout', () => {
     expect(classifyHybridLayout({ ...plain, type: 'cover' }).layout).toBeNull()
     expect(classifyHybridLayout({ ...plain, content: { ...plain.content, chart: { type: 'bar' } } }).layout).toBeNull()
   })
+
+  it('questions that read content printed elsewhere on the page stay on the legacy renderer', () => {
+    for (const question of [
+      'How many words are in each family?',
+      'According to the data table, how many Maple leaves were counted?',
+      'Which planet has the most habitability icons?',
+      'In sentence 2, which planet is named?',
+      'What word goes with the first picture?',
+      'How many leaves are there in the third basket?',
+      'Which animal in the story was the fastest?',
+    ]) expect(classifyHybridLayout(qPage([{ num: 1, question, answer: '3' }])).layout, question).toBeNull()
+    // Self-contained knowledge and word problems stay hybrid.
+    for (const question of ['How many legs does a spider have?', 'Sam has 12 leaves and finds 5 more. How many leaves does he have now?', 'Which CVC word is a pet that says "meow"?']) {
+      expect(classifyHybridLayout(qPage([{ num: 1, question, answer: '8' }])).layout, question).toBe('questions')
+    }
+  })
+
+  it('inline A–D options or True/False on every question → multiple_choice with a validated spec', () => {
+    const page = qPage([
+      { num: 1, question: 'Which planet is the largest? A) Mars B) Jupiter C) Venus D) Earth', answer: 'B' },
+      { num: 2, question: 'Which is closest to the Sun? (a) Earth (b) Mercury (c) Mars', answer: 'Mercury' },
+      { num: 3, question: 'True or False: The Asteroid Belt lies between Earth and Mars.', answer: 'False' },
+    ])
+    const c = classifyHybridLayout(page)
+    expect(c.layout).toBe('multiple_choice')
+    expect(c.spec.questions[0]).toEqual({ num: 1, question: 'Which planet is the largest?', options: ['Mars', 'Jupiter', 'Venus', 'Earth'], answer: 'B' })
+    expect(c.spec.questions[2]).toMatchObject({ question: 'The Asteroid Belt lies between Earth and Mars.', options: ['True', 'False'], answer: 'False' })
+    // An answer that is not exactly one option, or one question without options → plain questions.
+    expect(classifyHybridLayout(qPage([{ num: 1, question: 'Pick one: A) red B) blue', answer: 'green' }])).layout).toBe('questions')
+    expect(classifyHybridLayout(qPage([page.content.questions[0], { num: 2, question: 'What is 2 + 2?', answer: '4' }])).layout).toBe('questions')
+  })
 })
 
 describe('page illustration prompt', () => {

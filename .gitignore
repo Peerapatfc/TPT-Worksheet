@@ -6,3 +6,4 @@ scripts/test-drive-upload.js
 !package.json
 !package-lock.json
 !eval/cases.json
+samples-out/

@@ -3,8 +3,9 @@
 // Everything is a pure SVG string; text is XML-escaped by the caller via `textEl`.
 import { escapeXml, safeColor, tint } from '../svg-templates.js'
 import { cleanText } from './measure.js'
+import { FONT_STACK } from '../fonts.js'
 
-export const FONT = 'DejaVu Sans, Helvetica, Arial, sans-serif'
+export const FONT = FONT_STACK
 
 /** <text> element with escaped, XML-safe content. */
 export const textEl = (x, y, content, { size, weight = 'normal', fill = '#222', anchor = 'start', style = 'normal' }) =>
@@ -95,7 +96,7 @@ export const answerLine = (x1, x2, y, color = '#9a9a9a') =>
   `<line x1="${r1(x1)}" y1="${r1(y)}" x2="${r1(x2)}" y2="${r1(y)}" stroke="${color}" stroke-width="2.5" stroke-linecap="round"/>`
 
 /** Embed a prepared illustration (data-URI PNG) aspect-fit into a box, over a soft vignette. */
-export function illustrationEl(ill, box, pal) {
+export function illustrationEl(ill, box, pal, { vignette = true } = {}) {
   const scale = Math.min(box.w / ill.width, box.h / ill.height)
   const w = ill.width * scale
   const h = ill.height * scale
@@ -103,7 +104,7 @@ export function illustrationEl(ill, box, pal) {
   const y = box.y + (box.h - h) / 2
   return {
     rect: { x, y, w, h },
-    svg: `<ellipse cx="${r1(x + w / 2)}" cy="${r1(y + h * 0.55)}" rx="${r1(w * 0.5)}" ry="${r1(h * 0.45)}" fill="${pal.pale}"/>` +
+    svg: (vignette ? `<ellipse cx="${r1(x + w / 2)}" cy="${r1(y + h * 0.55)}" rx="${r1(w * 0.5)}" ry="${r1(h * 0.45)}" fill="${pal.pale}"/>` : '') +
       `<image x="${r1(x)}" y="${r1(y)}" width="${r1(w)}" height="${r1(h)}" href="${escapeXml(ill.href)}"/>`,
   }
 }
