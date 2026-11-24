@@ -12,13 +12,14 @@ export const hasCloudflareCreds = (env = process.env) =>
  * Generate one illustration with Cloudflare Workers AI FLUX.1 [schnell].
  * Returns the raw image (base64-decoded JPEG, 1024×1024). Throws an Error with
  * `.status` on HTTP failure so withRetry retries 429/500/503.
- * Counted under the `cover_illustration` cost bucket (free tier → USD 0).
+ * Counted under the `bucket` cost step (default `cover_illustration`; pages use
+ * `page_illustration`) — free tier → USD 0.
  *
  * @param {string} prompt  ≤ ~900 chars (FLUX takes ~256 tokens)
- * @param {{ env?: object, fetchImpl?: typeof fetch, retry?: object }} [opts]
+ * @param {{ env?: object, fetchImpl?: typeof fetch, retry?: object, bucket?: string }} [opts]
  * @returns {Promise<Buffer>}
  */
-export async function generateIllustration(prompt, { env = process.env, fetchImpl = fetch, retry = {} } = {}) {
+export async function generateIllustration(prompt, { env = process.env, fetchImpl = fetch, retry = {}, bucket = 'cover_illustration' } = {}) {
   if (!hasCloudflareCreds(env)) throw new Error('CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN not set')
   const url = `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODELS.coverIllustration}`
 
@@ -39,6 +40,6 @@ export async function generateIllustration(prompt, { env = process.env, fetchImp
     return json.result.image
   }, { label: 'Cloudflare FLUX', ...retry })
 
-  recordUsage('cover_illustration', MODELS.coverIllustration, {})
+  recordUsage(bucket, MODELS.coverIllustration, {})
   return Buffer.from(image, 'base64')
 }

@@ -32,6 +32,10 @@ function tidy(s) {
     .trim()
 }
 
+/** Remove quoted strings and text/typography, border, page-word and position phrases from a prompt fragment. Pure. */
+export const stripPrintedText = (s) =>
+  tidy(String(s ?? '').replace(QUOTED, '$1').replace(TEXT_PHRASE, '').replace(LAYOUT_PHRASE, '').replace(POSITION, '').replace(PAGE_WORDS, ''))
+
 /**
  * Turn the cover page's imagePrompt (brainstorm names the exact subjects to draw)
  * into the subject part of a FLUX prompt: quoted titles, text/typography, border,

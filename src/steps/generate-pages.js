@@ -8,6 +8,11 @@ import { addReviewNote } from '../lib/review-notes.js'
 import { answerKeySvg, renderSvg } from '../lib/svg-templates.js'
 import { chartPageSvg, validateChart } from '../lib/chart-page.js'
 import { useHybridCover, renderHybridCover } from '../lib/hybrid-cover.js'
+import { pageRenderer, renderHybridPage } from '../lib/hybrid-page.js'
+import { classifyHybridLayout } from '../lib/layout/classify.js'
+import { LayoutOverflowError } from '../lib/layout/measure.js'
+import { createIllustrationProvider } from '../lib/illustrations.js'
+import { readConcurrency } from '../lib/concurrency.js'
 import { validatePage } from './validate-page.js'
 import { reconcilePageContent } from './reconcile-content.js'
 
@@ -40,11 +45,62 @@ const TYPE_STYLE = {
 export const isChartPage = (page) =>
   (page.type === 'worksheet' || page.type === 'activity') && !!page.content?.chart && validateChart(page.content.chart).length === 0
 
-export async function generatePages(plan) {
-  const concurrency = parseInt(process.env.PAGE_CONCURRENCY ?? '1', 10) || 1
+/**
+ * Which renderer draws a page. Answer keys, chart pages and the cover keep their
+ * own renderers; worksheet/activity pages go to the hybrid layout engine only with
+ * PAGE_RENDERER=hybrid AND a P1 layout that fits their content — everything else
+ * stays on gpt-image-2 ('legacy'). Pure apart from an unknown-flag warning.
+ * @returns {{ route: 'answer_key'|'chart'|'cover'|'hybrid'|'legacy', layout?: string, wordBank?: string[], reason?: string }}
+ */
+export function routePage(page, env = process.env) {
+  if (page.type === 'answer_key') return { route: 'answer_key' }
+  if (isChartPage(page)) return { route: 'chart' }
+  if (page.type === 'cover') return { route: 'cover' }
+  if (pageRenderer(env) !== 'hybrid') return { route: 'legacy' }
+  const c = classifyHybridLayout(page)
+  return c.layout ? { route: 'hybrid', ...c } : { route: 'legacy', reason: c.reason }
+}
+
+/**
+ * Worksheet/activity page. Hybrid pages skip validate/reconcile (text is exact).
+ * A page with no P1 layout, or whose content overflows the hybrid layout, is drawn
+ * by gpt-image-2 instead (info log), so a hybrid run still completes end-to-end
+ * during the rollout. Deps are injectable for tests.
+ */
+export async function generateWorksheetPage(plan, page, {
+  env = process.env,
+  illustrations,
+  hybrid = renderHybridPage,
+  legacy = generateOnePage,
+} = {}) {
+  const r = routePage(page, env)
+  if (r.route === 'hybrid') {
+    try {
+      const { buffer, meta } = await hybrid(plan, page, { layout: r.layout, wordBank: r.wordBank, illustrations })
+      console.log(`Rendered hybrid page ${page.pageNum}/${plan.pageCount}: ${page.filename} (${r.layout}, ${meta?.size ?? '?'}px, art ${meta?.art ?? '?'})`)
+      return { ...page, buffer }
+    } catch (err) {
+      if (!(err instanceof LayoutOverflowError)) {
+        console.warn(`p${page.pageNum}: hybrid render failed (${err.message}) — using gpt-image-2`)
+        addReviewNote('fallback', `p${page.pageNum} (${page.filename}): hybrid render failed (${err.message}); drawn by gpt-image-2 instead`)
+      } else {
+        console.log(`p${page.pageNum}: content too long for the ${r.layout} layout — using gpt-image-2`)
+      }
+    }
+  } else if (r.reason) {
+    console.log(`p${page.pageNum}: no hybrid layout yet (${r.reason}) — using gpt-image-2`)
+  }
+  return legacy(plan, page)
+}
+
+export async function generatePages(plan, { env = process.env } = {}) {
+  const concurrency = parseInt(env.PAGE_CONCURRENCY ?? '1', 10) || 1
+  const illustrations = pageRenderer(env) === 'hybrid'
+    ? createIllustrationProvider({ concurrency: readConcurrency(env, 'ILLUSTRATION_CONCURRENCY', 2) })
+    : null
   const aiPages = plan.pages.filter(p => p.type !== 'answer_key' && !isChartPage(p))
   const generated = await mapWithConcurrency(aiPages, concurrency, page =>
-    page.type === 'cover' ? generateCoverPage(plan, page) : generateOnePage(plan, page))
+    page.type === 'cover' ? generateCoverPage(plan, page) : generateWorksheetPage(plan, page, { env, illustrations }))
 
   let next = 0
   return Promise.all(plan.pages.map(async page => {
