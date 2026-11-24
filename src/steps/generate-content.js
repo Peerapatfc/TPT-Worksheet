@@ -4,7 +4,7 @@ import { groq } from '../llm/clients.js'
 import { callTool } from '../llm/tool-call.js'
 import { MODELS } from '../config/constants.js'
 import { slugify } from '../lib/slugify.js'
-import { mapWithConcurrency } from '../lib/concurrency.js'
+import { mapWithConcurrency, readConcurrency } from '../lib/concurrency.js'
 import { addReviewNote } from '../lib/review-notes.js'
 import { quotesMissingFromSpec } from '../lib/spec-consistency.js'
 import { validateChart, repairChart, CHART_TYPES, CHART_ICONS, CHART_LIMITS } from '../lib/chart-page.js'
@@ -270,7 +270,10 @@ export function isLayoutQuestion(question) {
 // One recheck call carrying a whole 26+ page set exceeded Groq's request limit
 // (HTTP 413) and the set shipped unchecked, so pages are rechecked in small chunks.
 export const RECHECK_PAGES_PER_CALL = 5
-const RECHECK_CONCURRENCY = 2
+// Groq's free tier allows 8000 tokens/minute for gpt-oss-120b and one recheck call is
+// ~7k (prompt + reserved max_tokens), so two parallel calls can never fit: default 1.
+// Paid tiers can raise it with RECHECK_CONCURRENCY.
+export const recheckConcurrency = (env = process.env) => readConcurrency(env, 'RECHECK_CONCURRENCY', 1)
 
 /** Split an array into consecutive chunks of at most `size`. Pure — exported for unit testing. */
 export function chunk(items, size) {
@@ -353,7 +356,7 @@ export async function recheckWithSplit(plan, pages, check = recheckPages) {
 
 export async function validateAndCorrect(plan, contentData) {
   const groups = chunk(contentData.pages, RECHECK_PAGES_PER_CALL)
-  const results = await mapWithConcurrency(groups, RECHECK_CONCURRENCY, g => recheckWithSplit(plan, g))
+  const results = await mapWithConcurrency(groups, recheckConcurrency(), g => recheckWithSplit(plan, g))
 
   const unchecked = results.flatMap(r => r.unchecked)
   if (unchecked.length > 0) {

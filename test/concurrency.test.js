@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mapWithConcurrency } from '../src/lib/concurrency.js'
+import { mapWithConcurrency, readConcurrency } from '../src/lib/concurrency.js'
 
 const tick = (ms = 0) => new Promise(r => setTimeout(r, ms))
 
@@ -41,5 +41,20 @@ describe('mapWithConcurrency', () => {
 
   it('handles an empty list', async () => {
     expect(await mapWithConcurrency([], 4, async (v) => v)).toEqual([])
+  })
+})
+
+describe('readConcurrency', () => {
+  it('returns the fallback for missing, junk, zero or negative values', () => {
+    for (const v of [undefined, '', 'abc', '0', '-2', '1.5', 'NaN', ' ']) {
+      expect(readConcurrency({ X: v }, 'X', 1)).toBe(1)
+    }
+    expect(readConcurrency({}, 'X', 3)).toBe(3)
+    expect(readConcurrency(undefined, 'X', 3)).toBe(3)
+  })
+
+  it('parses positive integers', () => {
+    expect(readConcurrency({ X: '2' }, 'X', 1)).toBe(2)
+    expect(readConcurrency({ X: ' 4 ' }, 'X', 1)).toBe(4)
   })
 })
