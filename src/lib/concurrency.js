@@ -23,3 +23,15 @@ export async function mapWithConcurrency(items, limit, fn) {
   await Promise.all(Array.from({ length: Math.min(max, items.length) }, worker))
   return results
 }
+
+/**
+ * Read a positive-integer concurrency setting from an env-like object.
+ * Missing, non-numeric, fractional-garbage, zero or negative values -> `fallback`.
+ * Pure — exported for unit testing.
+ */
+export function readConcurrency(env, name, fallback) {
+  const raw = String(env?.[name] ?? '').trim()
+  if (!/^\d+$/.test(raw)) return fallback
+  const n = Number(raw)
+  return n >= 1 ? n : fallback
+}
