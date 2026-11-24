@@ -76,7 +76,7 @@ export async function generateWorksheetPage(plan, page, {
   const r = routePage(page, env)
   if (r.route === 'hybrid') {
     try {
-      const { buffer, meta } = await hybrid(plan, page, { layout: r.layout, wordBank: r.wordBank, illustrations })
+      const { buffer, meta } = await hybrid(plan, page, { layout: r.layout, wordBank: r.wordBank, spec: r.spec, illustrations })
       console.log(`Rendered hybrid page ${page.pageNum}/${plan.pageCount}: ${page.filename} (${r.layout}, ${meta?.size ?? '?'}px, art ${meta?.art ?? '?'})`)
       return { ...page, buffer }
     } catch (err) {
