@@ -54,6 +54,11 @@ jobs:
           PAGE_CONCURRENCY:            ${{ vars.PAGE_CONCURRENCY }}
           MARKET_CHECK:                ${{ vars.MARKET_CHECK }}
           FORCE_GENERATE:              ${{ github.event.inputs.force }}
+          COVER_RENDERER:              ${{ vars.COVER_RENDERER }}
+          CLOUDFLARE_ACCOUNT_ID:       ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN:        ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          BRAINSTORM_PROVIDER:         ${{ vars.BRAINSTORM_PROVIDER }}
+          RECHECK_CONCURRENCY:         ${{ vars.RECHECK_CONCURRENCY }}
 
       - name: Upload logs
         if: always()
