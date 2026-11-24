@@ -14,10 +14,11 @@ import { recordUsage } from '../lib/cost-tracker.js'
  *   maxTokens?: number,
  *   label?: string,
  *   step?: string,         // cost-log bucket (defaults to label)
+ *   extra?: object,        // extra request params (e.g. { reasoning_effort: 'low' }); omitted when absent
  * }} opts
  * @returns {Promise<{ message: object, toolCall: object|null, args: object|null, usage?: object }>}
  */
-export async function callTool(client, { model, messages, tool, maxTokens, label = 'OpenAI', step = label }) {
+export async function callTool(client, { model, messages, tool, maxTokens, label = 'OpenAI', step = label, extra }) {
   const result = await withRetry(
     () => client.chat.completions.create({
       model,
@@ -25,6 +26,7 @@ export async function callTool(client, { model, messages, tool, maxTokens, label
       tools: [tool],
       tool_choice: { type: 'function', function: { name: tool.function.name } },
       messages,
+      ...(extra ?? {}),
     }),
     { label },
   )

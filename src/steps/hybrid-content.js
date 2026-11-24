@@ -5,7 +5,8 @@
 // derived in code from each spec (layoutAnswerKey), so they always match the page.
 //
 // Flow per set: suggestLayout (code hint) → Groq in chunks of HYBRID_PAGES_PER_CALL
-// pages → normalize + repair + strict validation (+ a dry render for overflow) →
+// pages → normalize + repair + strict validation (+ a dry render for overflow; +
+// matching/sorting ambiguity checks, and a Groq self-check per matching page) →
 // failed pages are re-asked with their errors (HYBRID_MAX_ATTEMPTS) → a page that
 // still fails falls back to the `questions` layout built from any valid plain Q&A
 // it produced, or else to the legacy content prompt (imageSpec + questions), which
@@ -15,7 +16,7 @@ import { groq } from '../llm/clients.js'
 import { callTool } from '../llm/tool-call.js'
 import { MODELS } from '../config/constants.js'
 import { addReviewNote } from '../lib/review-notes.js'
-import { validateLayoutSpec, layoutAnswerKey, LIMITS, POLYGONS, FRACTION_SHAPES, LETTERS, mcAnswerIndex } from '../lib/layout/specs.js'
+import { validateLayoutSpec, layoutAnswerKey, matchingOrder, LIMITS, POLYGONS, FRACTION_SHAPES, LETTERS, mcAnswerIndex } from '../lib/layout/specs.js'
 import { cleanText, LayoutOverflowError } from '../lib/layout/measure.js'
 import { renderLayout } from '../lib/layout/index.js'
 import { validateChart, repairChart, CHART_TYPES, CHART_ICONS, CHART_LIMITS } from '../lib/chart-page.js'
@@ -196,7 +197,7 @@ Every page is typeset by code from the structured data you return. Pick ONE layo
 - questions: questions [{num, question, answer}], ${qMin}–${qMax} items. Short-answer knowledge questions or word problems.
 - multiple_choice: questions [{num, question, options (2–4), answer}], ${qMin}–${qMax} items. answer = the letter (A–D) of the one correct option; options distinct.
 - fill_blank: wordBank (the answers, ≤3 words each) + sentences [{num, sentence, answer}], ${qMin}–${qMax} items. Each sentence contains "___" where its answer goes and never contains the answer itself; every answer is in wordBank.
-- matching: pairs [{term, match}], 4–8 pairs. term ≤${LIMITS.term} chars, match ≤${LIMITS.text} chars (a definition, fact or word). Code shuffles the right column.
+- matching: pairs [{term, match}], 4–8 pairs. term ≤${LIMITS.term} chars, match ≤12 words (a definition, unique fact or word). Code shuffles the right column.
 - sorting: categories (2–3 headings) + sortItems [{word, category}], 6–12 items, each word ≤${LIMITS.word} chars, each category used at least twice.
 - labeling: subject (one concrete thing drawn large, e.g. "a sunflower plant") + labels [{word, clue}], 4–6 labels. The student writes the word from the word bank next to each numbered clue. A clue describes the part's job or look in words and never contains its word.
 - table_fill: columns (2–4 headers) + rows (3–6 rows, each the same length as columns). A blank cell is written as its answer in square brackets, e.g. ["Cat", "4", "[8]"]. Every blank must follow from the rest of its row (a rule named in the header such as "Total" or "Double") or from a well-known fact. Optional: up to 3 questions that need the table (compare, total, difference) — never one whose answer is just a blank or a printed cell.
@@ -212,7 +213,9 @@ THE PICTURE IS DECORATION ONLY. Each page gets one illustration from an AI that 
 
 Content rules:
 - Every question, clue, blank and table cell has exactly ONE correct, checkable answer that is factually and academically correct. No opinion or guessing questions ("What do you think…", "Who is likely…"), no negative questions with several valid answers, no questions about the student's own drawing, collection, story or experience.
-- Matching: every term has exactly one correct match and no match fits two terms. Sorting: every word clearly belongs to exactly one category.
+- Matching: each match must be TRUE for its own term and FALSE for every other term on the page, so a student who knows the topic finds exactly one fit. Use a definition, a fact unique within the list, or a superlative ("closest", "largest", "only") — never a property several of the terms share ("has rings", "is a mammal", "lives in water", "is big", "is important"). In a set whose members are alike (planets, animals, shapes) pick the one fact that singles each out. Terms all different; a match never contains its own term.
+  Bad (planets): Saturn – "Has a system of rings" (Jupiter, Uranus and Neptune have rings too). Good: Mercury – "Closest planet to the Sun"; Jupiter – "Largest planet".
+- Sorting: every word clearly belongs to exactly one category and appears only once.
 - Use only words a ${plan.gradeLevel} student can read; avoid technical terms unless the page defines them.
 - Answers are short: a word, number or short phrase.
 
@@ -255,6 +258,56 @@ export const readsOtherPageContent = (q) => READS_MISSING.some(re => re.test(Str
 /** True if student-facing text depends on the decorative picture. Pure — exported for unit testing. */
 export function isPictureDependent(text) {
   return PICTURE_DEPENDENT.some(re => re.test(String(text ?? '')))
+}
+
+// ── Matching / sorting ambiguity (cheap code checks) ─────────────────────────
+// "One verifiable answer per question": a matching meaning true for several terms
+// lets a student be right and marked wrong. These checks are deterministic and
+// conservative; the Groq self-check below catches the rest (shared properties).
+const esc = (v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** Lower-case, punctuation and filler words (a/an/the/it/is/are) removed, for near-duplicate checks. Pure. */
+const loose = (v) => norm(v).replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\b(?:a|an|the|it|its|is|are)\b/g, ' ').replace(/\s+/g, ' ').trim()
+// Bare vague properties: never a definition, so never unique within a list.
+const VAGUE_MATCH = /^(?:(?:it|they) )?(?:is|are) (?:very |really |so )?(?:big|large|small|tiny|huge|important|useful|helpful|interesting|special|nice|good|cool|common|different)$/
+// "Has rings" alone: true of every giant planet, the live failure this guards.
+const RINGS_MATCH = /^(?:(?:it|they) )?(?:has|have) (?:a )?(?:(?:system|set) of )?rings?(?: system)?(?: around (?:it|them))?$/
+
+/**
+ * Ambiguity issues of a matching spec ([] = none found): meanings that are the same
+ * after normalisation, a meaning that contains its own term, and bare shared
+ * properties ("Has rings", "Is big"). Messages are written for the retry prompt. Pure.
+ */
+export function matchingIssues(pairs = []) {
+  const issues = []
+  const seen = new Map()
+  pairs.forEach((p, i) => {
+    const m = loose(p.match)
+    const t = loose(p.term)
+    const prev = seen.get(m)
+    if (m && prev !== undefined && norm(pairs[prev].match) !== norm(p.match)) issues.push(`"${p.term}" and "${pairs[prev].term}" have the same match ("${p.match}") — give each term a different fact`)
+    else if (m) seen.set(m, i)
+    if (t.length >= 2 && new RegExp(`(?:^| )${esc(t)}(?:s|es)?(?: |$)`).test(m)) issues.push(`the match for "${p.term}" contains the term itself — it gives the answer away`)
+    const bare = norm(p.match).replace(/[.!]+$/, '')
+    if (VAGUE_MATCH.test(bare) || RINGS_MATCH.test(bare)) issues.push(`"${p.match}" (for "${p.term}") is a property several items share — use a fact true only for "${p.term}"`)
+  })
+  return issues
+}
+
+/** Ambiguity issues of a sorting spec: a word under two categories, or a word that is a heading. Pure. */
+export function sortingIssues(spec = {}) {
+  const issues = []
+  const cats = new Map()
+  for (const it of spec.items ?? []) {
+    const k = norm(it.word)
+    const e = cats.get(k) ?? { word: it.word, list: [] }
+    e.list.push(it.category)
+    cats.set(k, e)
+    if ((spec.categories ?? []).some(c => norm(c) === k)) issues.push(`sort word "${it.word}" is also a category heading`)
+  }
+  for (const { word, list } of cats.values()) {
+    if (new Set(list.map(norm)).size > 1) issues.push(`sort word "${word}" is listed under ${list.map(c => `"${c}"`).join(' and ')} — each word must fit exactly one category`)
+  }
+  return issues
 }
 
 /** Every student-facing string of a page's raw content, with a label for error messages. Pure. */
@@ -353,7 +406,9 @@ export function normalizeHybridPage(raw) {
       const items = dedupeBy(arr(raw.sortItems ?? raw.items).map(it => {
         const cat = categories.find(c => norm(c) === norm(it.category))
         return { word: s(it.word), category: cat ?? s(it.category) }
-      }), it => norm(it.word))
+      // Keyed by word + category: a word filed under two categories survives so the
+      // validator can reject it (ambiguous) instead of silently keeping the first.
+      }), it => (norm(it.word) ? `${norm(it.word)}|${norm(it.category)}` : ''))
       if (items.length > LIMITS.items.max) repairs.push(`sorting trimmed to ${LIMITS.items.max} items`)
       spec = { categories, items: items.slice(0, LIMITS.items.max) }
       break
@@ -430,6 +485,8 @@ export function validateHybridPage(norm_, { packageType = 'small', plan = null, 
     }
   } else {
     issues.push(...validateLayoutSpec(layout, spec))
+    if (layout === 'matching') issues.push(...matchingIssues(spec.pairs))
+    if (layout === 'sorting') issues.push(...sortingIssues(spec))
     if (layout === 'multiple_choice' && spec.questions?.length < minQ) issues.push(`only ${spec.questions.length} questions (min ${minQ})`)
   }
   const asked = layout === 'multiple_choice' ? spec.questions : layout === 'table_fill' ? spec.questions : questions
@@ -494,6 +551,142 @@ export function questionsFallback(attempts, opts) {
   return null
 }
 
+// ── Matching self-check ──────────────────────────────────────────────────────
+// The strongest ambiguity guard: after a matching page validates, a second small
+// Groq call sees the terms and the statements (meanings) in the printed, shuffled
+// order — never the key — and reports, per statement, the term it best describes and
+// every OTHER term it is also true of. A statement true of another term, or matched
+// to a different term than the key, is ambiguous → the page is re-asked with those
+// pairs named (counts toward HYBRID_MAX_ATTEMPTS). Fail-open: a failed or unusable
+// self-check keeps the page with a review note.
+// Framing matters: asked "list every meaning that fits each term", gpt-oss solved the
+// page as a one-to-one puzzle by elimination and missed "has rings" (live, low and
+// medium effort), so the prompt asks it to find flaws, statement by statement.
+// ~330 prompt tokens + ≤MATCHING_CHECK_MAX_TOKENS reserved (~1k used at medium effort).
+export const MATCHING_CHECK_MAX_TOKENS = 1500
+export const MATCHING_CHECK_EFFORT = 'medium'
+
+/** False when MATCHING_SELF_CHECK=off (or 0/false/no). Pure given env. */
+export const matchingSelfCheckEnabled = (env = process.env) => !['off', '0', 'false', 'no'].includes(String(env.MATCHING_SELF_CHECK ?? '').trim().toLowerCase())
+
+const termNum = { anyOf: [{ type: 'integer' }, { type: 'string' }] }
+export const matchingSolveTool = {
+  type: 'function',
+  function: {
+    name: 'report_flaws',
+    description: 'For each statement: the term it best describes and every other term it is also true of',
+    parameters: {
+      type: 'object',
+      properties: {
+        statements: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              letter: { type: 'string' },
+              best: { ...termNum, description: 'number of the term the statement best describes' },
+              alsoTrueFor: { type: 'array', items: termNum, description: 'numbers of OTHER terms the statement is also factually true of; [] if none' },
+            },
+            required: ['letter', 'best', 'alsoTrueFor'],
+          },
+        },
+      },
+      required: ['statements'],
+    },
+  },
+}
+
+/** Self-check prompt: terms numbered, statements lettered in the order the page prints them. Pure. */
+export function buildMatchingCheckPrompt(plan, spec) {
+  const order = matchingOrder(spec)
+  return `Find flaws in a ${plan.gradeLevel} ${plan.subject} matching worksheet ("${plan.setTitle}"). Each statement must be true of exactly one term, or a student can be right and marked wrong. For each statement give the term it best describes, then — checking every other term on its own real-world facts, not by elimination — list every other term it is ALSO true of.
+
+Terms:
+${spec.pairs.map((p, i) => `${i + 1}. ${p.term}`).join('\n')}
+
+Statements:
+${order.map((pi, k) => `${LETTERS[k]}. ${spec.pairs[pi].match}`).join('\n')}
+
+Call report_flaws.`
+}
+
+/**
+ * Compare the self-check's answer with the key. Returns { valid: false } if it does
+ * not cover every statement, else { valid, ambiguous, issues, offending } where
+ * offending are the pair indices whose statement is also true of another term or
+ * was matched to a different term. Pure — exported for unit testing.
+ */
+export function matchingAmbiguity(spec, args) {
+  const order = matchingOrder(spec)
+  const n = spec.pairs.length
+  const toTerm = (v) => {
+    const num = Number(String(v ?? '').match(/^\s*(\d+)/)?.[1])
+    return num >= 1 && num <= n ? num - 1 : spec.pairs.findIndex(p => norm(p.term) === norm(v))
+  }
+  const seen = new Map() // pair index → { best, also }
+  for (const st of arr(args?.statements)) {
+    const k = LETTERS.indexOf(String(st?.letter ?? '').match(/^\s*\(?([A-Ja-j])\b/)?.[1]?.toUpperCase())
+    if (k < 0 || k >= n) continue
+    const list = Array.isArray(st.alsoTrueFor) ? st.alsoTrueFor : typeof st.alsoTrueFor === 'string' ? st.alsoTrueFor.split(/[,;\s]+/) : []
+    seen.set(order[k], { best: toTerm(st.best), also: [...new Set(list.map(toTerm))].filter(t => t >= 0) })
+  }
+  if (seen.size < n) return { valid: false }
+  const issues = []
+  const offending = []
+  const q = (v) => `"${s(v)}"`
+  for (let j = 0; j < n; j++) {
+    const { best, also } = seen.get(j)
+    const others = [...new Set([best, ...also])].filter(t => t >= 0 && t !== j)
+    if (!others.length) continue
+    offending.push(j)
+    const { term, match } = spec.pairs[j]
+    issues.push(best >= 0 && best !== j
+      ? `ambiguous: a checker matched ${q(match)} to ${q(spec.pairs[best].term)}, not ${q(term)} — use a fact true only for ${q(term)}`
+      : `ambiguous: the match ${q(match)} (for ${q(term)}) is also true for ${others.map(t => q(spec.pairs[t].term)).join(', ')} — use a fact true only for ${q(term)}`)
+  }
+  return { valid: true, ambiguous: issues.length > 0, issues, offending }
+}
+
+/** One Groq self-check call. Returns the tool args (or null). Throws on API errors. */
+async function solveMatchingGroq(plan, spec, stats) {
+  const t0 = Date.now()
+  try {
+    const res = await callTool(groq(), {
+      model: MODELS.content,
+      maxTokens: MATCHING_CHECK_MAX_TOKENS,
+      tool: matchingSolveTool,
+      messages: [{ role: 'user', content: buildMatchingCheckPrompt(plan, spec) }],
+      label: 'Groq matching self-check',
+      step: 'content_self_check',
+      extra: { reasoning_effort: MATCHING_CHECK_EFFORT },
+    })
+    stats?.calls.push({ kind: 'matching_check', pages: 1, ms: Date.now() - t0, usage: res.usage ?? null, ok: !!res.args })
+    return res.args
+  } catch (err) {
+    stats?.calls.push({ kind: 'matching_check', pages: 1, ms: Date.now() - t0, error: err.status ?? err.message, code: err.error?.code ?? err.code })
+    throw err
+  }
+}
+
+/**
+ * Self-check one matching spec. Returns matchingAmbiguity's result, or { error } when
+ * the call failed or its answer was unusable (callers keep the page: fail-open).
+ */
+export async function selfCheckMatching(plan, spec, { solve = solveMatchingGroq, stats = null } = {}) {
+  try {
+    const r = matchingAmbiguity(spec, await solve(plan, spec, stats))
+    return r.valid ? r : { error: 'answer did not cover every term' }
+  } catch (err) {
+    return { error: String(err.status ?? err.message) }
+  }
+}
+
+/** A matching spec without the offending pairs, if ≥ LIMITS.pairs.min remain; else null. Pure. */
+export function dropPairs(spec, offending) {
+  const pairs = spec.pairs.filter((_, i) => !offending.includes(i))
+  return pairs.length >= LIMITS.pairs.min ? { ...spec, pairs } : null
+}
+
 // ── Groq calls ───────────────────────────────────────────────────────────────
 /** Ask Groq for a chunk of pages. Returns raw pages[] or null on failure. */
 async function fetchHybridChunk(plan, pages, feedback, stats) {
@@ -521,13 +714,15 @@ async function fetchHybridChunk(plan, pages, feedback, stats) {
  * { pages: Map(pageNum → content), failed: page[], log } — `failed` pages need the
  * legacy fallback. `fetchChunk` is injectable for tests and the live eval.
  */
-export async function generateHybridPages(plan, contentPages, { fetchChunk = fetchHybridChunk, stats = null } = {}) {
+export async function generateHybridPages(plan, contentPages, { fetchChunk = fetchHybridChunk, solveMatching, stats = null } = {}) {
   const opts = (page) => ({ packageType: plan.packageType, plan, page: { ...page, title: page.title } })
   const done = new Map()
   const attempts = new Map(contentPages.map(p => [p.pageNum, []]))
   let pending = contentPages
   const feedback = new Map()
   const missing = new Set()
+  const selfCheck = matchingSelfCheckEnabled()
+  const ambiguous = new Map() // pageNum → latest valid-but-ambiguous matching attempt
 
   for (let attempt = 1; attempt <= HYBRID_MAX_ATTEMPTS && pending.length; attempt++) {
     // Pages whose whole call failed (e.g. 400 tool_use_failed) are retried one per call,
@@ -537,6 +732,7 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
     missing.clear()
     const results = await mapWithConcurrency(groups, recheckConcurrency(), g => fetchChunk(plan, g, feedback, stats))
     const next = []
+    const checked = []
     groups.forEach((group, gi) => {
       const raws = results[gi] ?? []
       for (const page of group) {
@@ -549,23 +745,50 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
           continue
         }
         const n = normalizeHybridPage(raw)
-        const issues = validateHybridPage(n, opts({ ...page, title: s(raw.title) }))
+        checked.push({ page, raw, n, issues: validateHybridPage(n, opts({ ...page, title: s(raw.title) })) })
         attempts.get(page.pageNum).push({ ...n, raw })
-        stats?.pages.push({ pageNum: page.pageNum, attempt, layout: n.layout, issues, repairs: n.repairs, raw })
-        if (issues.length === 0) {
-          done.set(page.pageNum, { content: hybridPageContent(raw, n), repairs: n.repairs })
-        } else {
-          console.warn(`hybrid content p${page.pageNum} (${n.layout}, attempt ${attempt}/${HYBRID_MAX_ATTEMPTS}): ${issues.join('; ')}`)
-          feedback.set(page.pageNum, issues.slice(0, 6))
-          next.push(page)
-        }
       }
     })
+    // Matching pages that validated get the self-check (sequential, like every Groq call).
+    const toSolve = selfCheck ? checked.filter(c => !c.issues.length && c.n.layout === 'matching') : []
+    const solved = await mapWithConcurrency(toSolve, recheckConcurrency(), c => selfCheckMatching(plan, c.n.spec, { ...(solveMatching ? { solve: solveMatching } : {}), stats }))
+    toSolve.forEach((c, i) => {
+      const r = solved[i]
+      if (r.error) {
+        console.warn(`matching self-check p${c.page.pageNum} failed (${r.error}) — page kept unchecked`)
+        addReviewNote('fallback', `p${c.page.pageNum}: matching self-check failed (${r.error}) — check that every meaning fits only one term`)
+      } else if (r.ambiguous) {
+        c.issues = r.issues
+        ambiguous.set(c.page.pageNum, { ...c, offending: r.offending })
+      }
+    })
+    for (const { page, raw, n, issues } of checked) {
+      stats?.pages.push({ pageNum: page.pageNum, attempt, layout: n.layout, issues, repairs: n.repairs, raw })
+      if (issues.length === 0) {
+        done.set(page.pageNum, { content: hybridPageContent(raw, n), repairs: n.repairs })
+      } else {
+        console.warn(`hybrid content p${page.pageNum} (${n.layout}, attempt ${attempt}/${HYBRID_MAX_ATTEMPTS}): ${issues.join('; ')}`)
+        feedback.set(page.pageNum, issues.slice(0, 6))
+        next.push(page)
+      }
+    }
     pending = next
   }
 
   const failed = []
   for (const page of pending) {
+    // Still ambiguous after every attempt: ship the last one without its offending
+    // pairs if enough remain (the rest were confirmed unambiguous by the self-check).
+    const amb = ambiguous.get(page.pageNum)
+    const kept = amb && dropPairs(amb.n.spec, amb.offending)
+    if (kept) {
+      const n = { ...amb.n, spec: kept }
+      if (validateHybridPage(n, opts({ ...page, title: s(amb.raw.title) })).length === 0) {
+        done.set(page.pageNum, { content: hybridPageContent(amb.raw, n), repairs: [...n.repairs, `dropped ${amb.offending.length} ambiguous matching pair(s)`] })
+        addReviewNote('fallback', `p${page.pageNum}: matching stayed ambiguous after ${HYBRID_MAX_ATTEMPTS} attempts — dropped ${amb.offending.map(i => `"${amb.n.spec.pairs[i].term}"`).join(', ')}; ${kept.pairs.length} pairs remain`)
+        continue
+      }
+    }
     const tried = attempts.get(page.pageNum)
     const fb = questionsFallback(tried, opts({ ...page, title: s(tried[0]?.raw?.title) }))
     if (fb) {
@@ -790,10 +1013,11 @@ export async function recheckHybridContent(plan, pages, { check = recheckHybridP
  * Hybrid content for every worksheet/activity page: structured layouts (validated,
  * rechecked) plus legacy content for pages that never validated. Returns a Map
  * pageNum → page.content. Deps injectable for tests: fetchChunk (Groq content),
- * check (Groq recheck), legacy (async (plan, pages) → [{ pageNum, ...legacyContent }]).
+ * solveMatching (Groq matching self-check), check (Groq recheck), legacy
+ * (async (plan, pages) → [{ pageNum, ...legacyContent }]).
  */
-export async function generateHybridContent(plan, contentPages, { fetchChunk, check, legacy, stats } = {}) {
-  const { pages, failed } = await generateHybridPages(plan, contentPages, { fetchChunk, stats })
+export async function generateHybridContent(plan, contentPages, { fetchChunk, solveMatching, check, legacy, stats } = {}) {
+  const { pages, failed } = await generateHybridPages(plan, contentPages, { fetchChunk, solveMatching, stats })
   for (const [pn, v] of pages) v.repairs.forEach(r => console.log(`  p${pn}: repaired — ${r}`))
   const byNum = new Map(contentPages.map(p => [p.pageNum, p]))
   let structured = [...pages].map(([pageNum, v]) => ({ pageNum, content: v.content }))

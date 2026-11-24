@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   suggestLayout, buildHybridContentPrompt, hybridContentTool, normalizeHybridPage, validateHybridPage,
   isPictureDependent, readsOtherPageContent, hybridPageContent, questionsFallback, generateHybridPages,
@@ -166,7 +166,9 @@ describe('answer keys come from the spec', () => {
 })
 
 describe('generateHybridPages: retry, chunking, fallbacks', () => {
-  beforeEach(() => { resetReviewNotes(); vi.spyOn(console, 'warn').mockImplementation(() => {}); vi.spyOn(console, 'log').mockImplementation(() => {}) })
+  // The matching self-check (an extra Groq call) has its own suite: test/matching-ambiguity.test.js.
+  beforeEach(() => { resetReviewNotes(); vi.stubEnv('MATCHING_SELF_CHECK', 'off'); vi.spyOn(console, 'warn').mockImplementation(() => {}); vi.spyOn(console, 'log').mockImplementation(() => {}) })
+  afterEach(() => vi.unstubAllEnvs())
   const pages = [page(2, 'plant-words-match', 'Match plant words'), page(3, 'plant-quiz', 'A multiple choice quiz'), page(4, 'fill', 'Fill in the blank'), page(5, 'sort', 'Sort living things')]
 
   it('chunks pages, retries only the invalid page with its errors, and validates', async () => {
