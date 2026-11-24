@@ -8,7 +8,8 @@
     "test:watch": "vitest",
     "test:plan": "node scripts/test-plan.js",
     "create-issue": "node scripts/create-issue.js",
-    "eval": "node scripts/eval.js"
+    "eval": "node scripts/eval.js",
+    "render:samples": "node scripts/render-samples.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",
