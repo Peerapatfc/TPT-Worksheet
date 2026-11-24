@@ -202,5 +202,110 @@ ${badgeSvg}
 </svg>`
 }
 
+/** Blend a #RRGGBB color toward white by `t` (0 = color, 1 = white). Pure. */
+export function tint(hex, t) {
+  const c = safeColor(hex)
+  const ch = (i) => Math.round(parseInt(c.slice(i, i + 2), 16) * (1 - t) + 255 * t).toString(16).padStart(2, '0')
+  return `#${ch(1)}${ch(3)}${ch(5)}`
+}
+
+// Wider than wrapText's estimate: cover titles are large and bold, so leave margin.
+const TITLE_EM = 0.7
+const COVER_MARGIN = 90
+
+/**
+ * Wrap the cover title at the largest size (step 4, 96 → 44) that fits in 3 lines;
+ * at the minimum size it may use more lines. Words longer than a line are
+ * hard-split, so a line never exceeds maxWidth. Pure — exported for unit testing.
+ */
+export function fitCoverTitle(title, maxWidth, { max = 96, min = 44, maxLines = 3 } = {}) {
+  let size = max
+  let lines
+  for (; size >= min; size -= 4) {
+    lines = wrapText(title, maxWidth, size * TITLE_EM / 0.62, true)
+    if (lines.length <= maxLines) return { size, lines }
+  }
+  size = min
+  return { size, lines: wrapText(title, maxWidth, size * TITLE_EM / 0.62, true) }
+}
+
+const sparkle = (x, y, r, fill) =>
+  `<path d="M${x} ${y - r} Q${x + r * 0.18} ${y - r * 0.18} ${x + r} ${y} Q${x + r * 0.18} ${y + r * 0.18} ${x} ${y + r} Q${x - r * 0.18} ${y + r * 0.18} ${x - r} ${y} Q${x - r * 0.18} ${y - r * 0.18} ${x} ${y - r} Z" fill="${fill}"/>`
+
+const cornerDots = (color, accent) => {
+  const one = `${sparkle(78, 92, 26, color)}${sparkle(130, 66, 13, accent)}${`<circle cx="66" cy="150" r="9" fill="${accent}"/>`}${`<circle cx="150" cy="118" r="6" fill="${color}" opacity=".6"/>`}`
+  return [
+    `<g>${one}</g>`,
+    `<g transform="translate(${PAGE_W} 0) scale(-1 1)">${one}</g>`,
+    `<g transform="translate(0 ${PAGE_H}) scale(1 -1)">${one}</g>`,
+    `<g transform="translate(${PAGE_W} ${PAGE_H}) scale(-1 -1)">${one}</g>`,
+  ].join('')
+}
+
+/**
+ * Hybrid cover page (1024×1536): code-drawn frame, title, subtitle, name line and
+ * grade/page-count pill around an AI illustration (`illustration.href` is a PNG data
+ * URI with transparent background; it is aspect-fit into the free area). Without an
+ * illustration the slot is left as a soft tinted panel. All text is XML-escaped. Pure.
+ *
+ * @param {{ title: string, subtitle?: string, gradeLabel?: string, pageCount?: number,
+ *   color?: string, illustration?: { href: string, width: number, height: number } | null }} opts
+ */
+export function hybridCoverSvg({ title, subtitle, gradeLabel, pageCount, color, illustration = null }) {
+  const c = safeColor(color)
+  const bg = tint(c, 0.92)
+  const soft = tint(c, 0.8)
+  const accent = tint(c, 0.45)
+  const innerW = PAGE_W - COVER_MARGIN * 2
+
+  const { size, lines } = fitCoverTitle(title, innerW)
+  const lineH = size * 1.12
+  const firstBase = 120 + size
+  const titleSvg = lines.map((l, i) => text(PAGE_W / 2, firstBase + i * lineH, l, { size, weight: 'bold', fill: c, anchor: 'middle' })).join('')
+  let y = firstBase + (lines.length - 1) * lineH
+
+  let subSvg = ''
+  if (subtitle) {
+    const subSize = fitFontSize([subtitle], innerW, 36, 24)
+    const subLines = wrapText(subtitle, innerW, subSize).slice(0, 2)
+    subSvg = subLines.map((l, i) => text(PAGE_W / 2, y + 66 + i * subSize * 1.25, l, { size: subSize, fill: '#555', anchor: 'middle', style: 'italic' })).join('')
+    y += 66 + (subLines.length - 1) * subSize * 1.25
+  }
+
+  const pillY = PAGE_H - 210
+  const nameY = pillY - 46
+  const slot = { x: COVER_MARGIN, y: y + 44, w: innerW, h: Math.max(200, nameY - 60 - (y + 44)) }
+
+  let art = `<ellipse cx="${PAGE_W / 2}" cy="${slot.y + slot.h / 2}" rx="${slot.w / 2 + 20}" ry="${slot.h / 2}" fill="${soft}" opacity=".55"/>`
+  if (illustration?.href && illustration.width > 0 && illustration.height > 0) {
+    const scale = Math.min(slot.w / illustration.width, slot.h / illustration.height)
+    const w = Math.round(illustration.width * scale)
+    const h = Math.round(illustration.height * scale)
+    const ix = Math.round(PAGE_W / 2 - w / 2)
+    const iy = Math.round(slot.y + (slot.h - h) / 2)
+    art = `<ellipse cx="${PAGE_W / 2}" cy="${iy + h / 2}" rx="${w / 2 + 24}" ry="${h / 2}" fill="${soft}" opacity=".55"/>` +
+      `<image x="${ix}" y="${iy}" width="${w}" height="${h}" href="${escapeXml(illustration.href)}"/>`
+  }
+
+  const pillText = [gradeLabel, pageCount ? `${pageCount} Printable Pages` : null].filter(Boolean).join(' | ')
+  const pillSize = fitFontSize([pillText], 560, 36, 22)
+  const pill = pillText
+    ? `<rect x="${PAGE_W / 2 - 320}" y="${pillY}" width="640" height="90" rx="45" fill="${c}"/>` +
+      text(PAGE_W / 2, pillY + 45 + pillSize * 0.36, pillText, { size: pillSize, weight: 'bold', fill: '#fff', anchor: 'middle' })
+    : ''
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${PAGE_W}" height="${PAGE_H}" viewBox="0 0 ${PAGE_W} ${PAGE_H}">
+<rect width="100%" height="100%" fill="${bg}"/>
+<rect x="16" y="16" width="${PAGE_W - 32}" height="${PAGE_H - 32}" rx="34" fill="#fff" stroke="${c}" stroke-width="12"/>
+<rect x="30" y="30" width="${PAGE_W - 60}" height="${PAGE_H - 60}" rx="24" fill="none" stroke="${accent}" stroke-width="3" stroke-dasharray="3 12" stroke-linecap="round"/>
+${cornerDots(c, accent)}
+${art}
+${titleSvg}
+${subSvg}
+${text(PAGE_W / 2, nameY, 'Name: ______________________________', { size: 28, fill: '#444', anchor: 'middle' })}
+${pill}
+</svg>`
+}
+
 /** Rasterize an SVG string to a PNG buffer. */
 export const renderSvg = (svg) => sharp(Buffer.from(svg)).png({ compressionLevel: 9 }).toBuffer()
