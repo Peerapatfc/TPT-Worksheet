@@ -10,6 +10,7 @@ import { chartPageSvg, validateChart } from '../lib/chart-page.js'
 import { useHybridCover, renderHybridCover } from '../lib/hybrid-cover.js'
 import { pageRenderer, renderHybridPage } from '../lib/hybrid-page.js'
 import { classifyHybridLayout } from '../lib/layout/classify.js'
+import { validateLayoutSpec } from '../lib/layout/specs.js'
 import { LayoutOverflowError } from '../lib/layout/measure.js'
 import { createIllustrationProvider } from '../lib/illustrations.js'
 import { readConcurrency } from '../lib/concurrency.js'
@@ -57,8 +58,23 @@ export function routePage(page, env = process.env) {
   if (isChartPage(page)) return { route: 'chart' }
   if (page.type === 'cover') return { route: 'cover' }
   if (pageRenderer(env) !== 'hybrid') return { route: 'legacy' }
+  const own = structuredRoute(page)
+  if (own) return own
   const c = classifyHybridLayout(page)
   return c.layout ? { route: 'hybrid', ...c } : { route: 'legacy', reason: c.reason }
+}
+
+/**
+ * Route for a page whose content came from the hybrid content step (content.layout
+ * + content.spec), or null when it has none / its spec no longer validates (then
+ * the P1/P2 classifier decides). Pure.
+ */
+export function structuredRoute(page) {
+  const { layout, spec } = page.content ?? {}
+  if (!layout || layout === 'chart') return null
+  if (layout === 'questions') return page.content.questions?.length ? { route: 'hybrid', layout } : null
+  if (layout === 'fill_blank') return page.content.questions?.length ? { route: 'hybrid', layout, wordBank: spec?.wordBank ?? [] } : null
+  return validateLayoutSpec(layout, spec).length ? null : { route: 'hybrid', layout, spec }
 }
 
 /**

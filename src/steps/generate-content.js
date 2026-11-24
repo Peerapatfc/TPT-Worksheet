@@ -8,6 +8,8 @@ import { mapWithConcurrency, readConcurrency } from '../lib/concurrency.js'
 import { addReviewNote } from '../lib/review-notes.js'
 import { quotesMissingFromSpec } from '../lib/spec-consistency.js'
 import { validateChart, repairChart, CHART_TYPES, CHART_ICONS, CHART_LIMITS } from '../lib/chart-page.js'
+import { pageRenderer } from '../lib/hybrid-page.js'
+import { generateHybridContent } from './hybrid-content.js'
 
 const contentTool = {
   type: 'function',
@@ -110,7 +112,7 @@ const validateTool = {
   },
 }
 
-async function fetchContent(plan, contentPages) {
+export async function fetchContent(plan, contentPages) {
   const pageDescriptions = contentPages
     .map(p => `- Page ${p.pageNum} (${p.type}): ${p.imagePrompt}`)
     .join('\n')
@@ -476,6 +478,8 @@ export function stripAnswerLeaks(contentData) {
 export async function generateContent(plan) {
   const contentPages = plan.pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
   if (contentPages.length === 0) return plan
+  // PAGE_RENDERER=hybrid: structured layout specs instead of imageSpec (hybrid-content.js).
+  if (pageRenderer() === 'hybrid') return generateContentHybrid(plan, contentPages)
 
   const MAX_RETRIES = 2
   let contentData = null
@@ -529,4 +533,45 @@ export async function generateContent(plan) {
   })
 
   return { ...plan, pages: updatedPages }
+}
+
+/**
+ * Legacy content (imageSpec + questions, the prompt above) for the hybrid pages that
+ * never produced a valid layout: same attempts, chart repair, schema check, recheck
+ * and answer-leak strip as generateContent. Returns [{ pageNum, ...content }] —
+ * empty when Groq returns nothing (those pages render from their imagePrompt).
+ */
+export async function legacyContentForPages(plan, pages) {
+  let best = null
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const candidate = await fetchContent(plan, pages)
+    if (!candidate) continue
+    const repairNotes = repairCharts(candidate)
+    const issues = validateSchema(candidate, pages, plan.packageType)
+    if (!best || issues.length < best.issues.length) best = { data: candidate, issues, repairNotes }
+    if (issues.length === 0) break
+  }
+  if (!best) return []
+  best.repairNotes.forEach(m => addReviewNote('chart_repaired', m))
+  if (best.issues.length) addReviewNote('fallback', `legacy Q&A content still had schema issues: ${best.issues.join(', ')}`)
+  const wanted = new Set(pages.map(p => p.pageNum))
+  best.data.pages = best.data.pages.filter(p => wanted.has(p.pageNum) && p.questions?.length && p.questions.every(q => String(q.answer ?? '').trim()))
+  return stripAnswerLeaks(await validateAndCorrect(plan, best.data)).pages
+}
+
+/** generateContent for PAGE_RENDERER=hybrid. Deps injectable for tests. */
+export async function generateContentHybrid(plan, contentPages, deps = {}) {
+  const contentMap = await generateHybridContent(plan, contentPages, { legacy: legacyContentForPages, ...deps })
+  if (contentMap.size === 0) throw new Error('Q&A generation failed: no hybrid or legacy content for any page')
+
+  const slug = slugify(plan.setTitle)
+  const date = new Date().toISOString().split('T')[0]
+  try {
+    mkdirSync(join('logs'), { recursive: true })
+    writeFileSync(join('logs', `content-${date}-${slug}.json`), JSON.stringify({ pages: [...contentMap].map(([pageNum, c]) => ({ pageNum, ...c })) }, null, 2))
+    console.log(`Content saved: logs/content-${date}-${slug}.json`)
+  } catch (err) {
+    console.warn(`generateContent: failed to save JSON (${err.message})`)
+  }
+  return { ...plan, pages: plan.pages.map(page => (contentMap.has(page.pageNum) ? { ...page, content: contentMap.get(page.pageNum) } : page)) }
 }

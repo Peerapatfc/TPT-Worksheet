@@ -24,11 +24,15 @@ const topicWords = (s) => clean(String(s ?? '').replace(GENERIC, ' ')).replace(/
 
 /**
  * Short concrete subject for a page's spot illustration (≤ 10 words). Order:
+ * 0) the hybrid content's own illustrationSubject, when present,
  * 1) the decoration the page imagePrompt asks for ("decorated with acorns and a squirrel"),
  * 2) topic words left in the page + set titles ("autumn leaf"),
  * 3) the set subject, or a generic school scene. Pure — exported for unit testing.
  */
 export function pageIllustrationSubject(plan, page) {
+  // Hybrid content names its own decorative subject (illustrationSubject).
+  const own = clean(stripPrintedText(page?.content?.illustrationSubject ?? ''))
+  if (/[a-z]{3}/i.test(own)) return capWords(own, MAX_SUBJECT_WORDS)
   const m = String(page?.imagePrompt ?? '').match(DECOR_PHRASE)
   if (m) {
     const s = clean(stripPrintedText(m[1].replace(CUT_AT, '')))

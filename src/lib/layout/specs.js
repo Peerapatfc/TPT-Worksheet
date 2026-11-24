@@ -34,6 +34,7 @@ export const LIMITS = {
 }
 
 export const POLYGONS = { triangle: 3, square: 4, rectangle: 4, rhombus: 4, trapezoid: 4, pentagon: 5, hexagon: 6, octagon: 8, circle: 0 }
+const ALSO_ACCEPT = { square: 'rectangle, rhombus, quadrilateral', rectangle: 'quadrilateral', rhombus: 'quadrilateral', trapezoid: 'quadrilateral' }
 export const FRACTION_SHAPES = ['circle', 'rectangle', 'bar']
 export const LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J']
 
@@ -223,7 +224,9 @@ export function shapeItemQA(it) {
   const n = POLYGONS[it.shape]
   if (it.ask === 'sides') return { question: 'How many sides?', answer: String(n) }
   if (it.ask === 'corners') return { question: 'How many corners?', answer: String(n) }
-  return { question: 'What is the name of this shape?', answer: it.shape }
+  // A square is also a rectangle and a rhombus; every 4-sided shape is a quadrilateral.
+  const also = ALSO_ACCEPT[it.shape]
+  return { question: 'What is the name of this shape?', answer: also ? `${it.shape} (also accept: ${also})` : it.shape }
 }
 
 /**

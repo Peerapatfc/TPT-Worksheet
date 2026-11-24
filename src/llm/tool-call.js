@@ -15,7 +15,7 @@ import { recordUsage } from '../lib/cost-tracker.js'
  *   label?: string,
  *   step?: string,         // cost-log bucket (defaults to label)
  * }} opts
- * @returns {Promise<{ message: object, toolCall: object|null, args: object|null }>}
+ * @returns {Promise<{ message: object, toolCall: object|null, args: object|null, usage?: object }>}
  */
 export async function callTool(client, { model, messages, tool, maxTokens, label = 'OpenAI', step = label }) {
   const result = await withRetry(
@@ -32,6 +32,6 @@ export async function callTool(client, { model, messages, tool, maxTokens, label
 
   const message = result.choices[0].message
   const toolCall = message.tool_calls?.[0]
-  if (!toolCall) return { message, toolCall: null, args: null }
-  return { message, toolCall, args: JSON.parse(toolCall.function.arguments) }
+  if (!toolCall) return { message, toolCall: null, args: null, usage: result.usage }
+  return { message, toolCall, args: JSON.parse(toolCall.function.arguments), usage: result.usage }
 }

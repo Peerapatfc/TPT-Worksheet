@@ -68,7 +68,8 @@ async function runSteps() {
   const planWithContent = await generateContent(plan)
   // generateContent throws if Groq returns nothing; a partial result is reported here.
   const contentPages = planWithContent.pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
-  const withContent = contentPages.filter(p => p.content?.questions?.length).length
+  // A hybrid colouring page (activity_art) has content but no questions.
+  const withContent = contentPages.filter(p => p.content?.questions?.length || p.content?.layout === 'activity_art').length
   if (withContent < contentPages.length) {
     addReviewNote('fallback', `${contentPages.length - withContent} of ${contentPages.length} worksheet/activity pages have no questions`)
   }
