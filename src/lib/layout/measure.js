@@ -25,12 +25,21 @@ function charEm(font, ch) {
   return cp > 0xffff ? ASTRAL_EM : UNKNOWN_EM
 }
 
+// Width in em per (font, string): layouts re-measure the same words at every size they try.
+const emCache = new Map()
+
 /** Width in px of `str` at `size` px in the bundled font. Pure. */
 export function measureText(str, size, { bold = false, italic = false } = {}) {
-  const m = fontMetrics()
-  const font = bold ? m.bold : italic ? m.italic : m.regular
-  let em = 0
-  for (const ch of String(str ?? '')) em += charEm(font, ch)
+  const key = `${bold ? 'b' : italic ? 'i' : 'r'}${String(str ?? '')}`
+  let em = emCache.get(key)
+  if (em === undefined) {
+    const m = fontMetrics()
+    const font = bold ? m.bold : italic ? m.italic : m.regular
+    em = 0
+    for (const ch of String(str ?? '')) em += charEm(font, ch)
+    if (emCache.size > 50000) emCache.clear()
+    emCache.set(key, em)
+  }
   return em * size * SAFETY
 }
 

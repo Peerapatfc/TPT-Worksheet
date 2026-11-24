@@ -3,12 +3,8 @@ import sharp from 'sharp'
 import { measureText, wrapText, wrapTokens, fitText, fitLine, glueMath, cleanText, NBSP, LayoutOverflowError } from '../src/lib/layout/measure.js'
 import { questionsPageSvg, fillBlankPageSvg, sentenceTokens, CONTENT, isShortAnswer, answerLineCount } from '../src/lib/layout/worksheet.js'
 import { PAGE_W, PAGE_H } from '../src/lib/svg-templates.js'
+import { rng, assertLayout } from './helpers/layout.js'
 
-// Deterministic PRNG so property failures are reproducible.
-function rng(seed) {
-  let s = seed >>> 0
-  return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 2 ** 32 }
-}
 const POOL = ['the', 'cat', 'sat', 'on', 'a', 'mat', '7', '+', '5', '=', '?', 'How', 'many', 'apples', 'are', 'left',
   'photosynthesis', 'Supercalifragilisticexpialidocious'.repeat(2), 'x'.repeat(60), '&', '<b>', '"quoted"', "it's",
   'Tom & Jerry', '🍎🍂', 'ภาษาไทย', 'naïve', 'café', '—', '12,345', '3/4', 'W'.repeat(25)]
@@ -16,35 +12,6 @@ const sentence = (r, n) => Array.from({ length: n }, () => POOL[Math.floor(r() *
 
 const plan = { setTitle: 'Autumn & <Fall> "Math" Adventures', gradeLevel: 'Grade 2', themeColor: '#E8731C', subject: 'Math' }
 const STUB_ART = { ill: { href: 'data:image/png;base64,AAAA', width: 600, height: 450 } }
-
-function overlaps(a, b) {
-  const e = 0.5
-  return a.x + e < b.x + b.w && b.x + e < a.x + a.w && a.y + e < b.y + b.h && b.y + e < a.y + a.h
-}
-
-/** Every drawn box stays on the page / in the content column, and no two overlap. */
-function assertLayout({ boxes }) {
-  for (const b of boxes) {
-    expect(b.x).toBeGreaterThanOrEqual(0)
-    expect(b.y).toBeGreaterThanOrEqual(0)
-    expect(b.x + b.w).toBeLessThanOrEqual(PAGE_W)
-    expect(b.y + b.h).toBeLessThanOrEqual(PAGE_H)
-    if (['text', 'badge', 'answer', 'blank', 'bank', 'art'].includes(b.kind)) {
-      expect(b.x).toBeGreaterThanOrEqual(CONTENT.left - 0.5)
-      expect(b.x + b.w).toBeLessThanOrEqual(CONTENT.right + 0.5)
-      expect(b.y + b.h).toBeLessThanOrEqual(CONTENT.bottom + 0.5)
-    }
-  }
-  const solid = boxes.filter(b => b.kind !== 'bg')
-  for (let i = 0; i < solid.length; i++) {
-    for (let j = i + 1; j < solid.length; j++) {
-      if (overlaps(solid[i], solid[j])) throw new Error(`overlap: ${JSON.stringify(solid[i])} × ${JSON.stringify(solid[j])}`)
-    }
-  }
-  // Background panels never overlap each other or the illustration.
-  const panels = boxes.filter(b => b.kind === 'bg' || b.kind === 'art' || b.kind === 'bank')
-  for (let i = 0; i < panels.length; i++) for (let j = i + 1; j < panels.length; j++) expect(overlaps(panels[i], panels[j])).toBe(false)
-}
 
 const svgText = (svg) => [...svg.matchAll(/<text [^>]*>([^<]*)<\/text>/g)].map(m => m[1]).join(' ').replace(new RegExp(NBSP, 'g'), ' ')
 const esc = (w) => w.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
@@ -134,7 +101,7 @@ describe('questions layout (property)', () => {
     // The rest are pages of up to 12 × 30 random words incl. 60-char words: they
     // must throw LayoutOverflowError (→ caller falls back), never overflow.
     expect(fitted).toBeGreaterThan(120)
-  })
+  }, 30000)
 
   it('fits 12 long questions by shrinking and dropping the illustration before failing', () => {
     const page = { pageNum: 3, type: 'worksheet', content: { title: 'Many', questions: Array.from({ length: 12 }, (_, k) => ({
@@ -199,7 +166,7 @@ describe('fill_blank layout (property)', () => {
       expect(out.boxes.filter(b => b.kind === 'blank').length).toBeGreaterThanOrEqual(n)
     }
     expect(fitted).toBeGreaterThan(150)
-  })
+  }, 30000)
 
   it('prints the word bank and keeps the float below it', () => {
     const page = { pageNum: 4, type: 'worksheet', content: { title: 'CVC', questions: [

@@ -53,7 +53,7 @@ export function repairChart(chart) {
 
 // ---- icons ---------------------------------------------------------------
 
-function iconSvg(shape, cx, cy, r, color) {
+export function iconSvg(shape, cx, cy, r, color) {
   const attrs = `fill="${color}" class="chart-icon"`
   switch (shape) {
     case 'square':
