@@ -199,7 +199,7 @@ Every page is typeset by code from the structured data you return. Pick ONE layo
 - matching: pairs [{term, match}], 4–8 pairs. term ≤${LIMITS.term} chars, match ≤${LIMITS.text} chars (a definition, fact or word). Code shuffles the right column.
 - sorting: categories (2–3 headings) + sortItems [{word, category}], 6–12 items, each word ≤${LIMITS.word} chars, each category used at least twice.
 - labeling: subject (one concrete thing drawn large, e.g. "a sunflower plant") + labels [{word, clue}], 4–6 labels. The student writes the word from the word bank next to each numbered clue. A clue describes the part's job or look in words and never contains its word.
-- table_fill: columns (2–4 headers) + rows (3–6 rows, each the same length as columns). A blank cell is written as its answer in square brackets, e.g. ["Cat", "4", "[8]"]. Every blank must follow from the rest of its row (a rule named in the header such as "Total" or "Double") or from a well-known fact. Optional: up to 3 questions about the table.
+- table_fill: columns (2–4 headers) + rows (3–6 rows, each the same length as columns). A blank cell is written as its answer in square brackets, e.g. ["Cat", "4", "[8]"]. Every blank must follow from the rest of its row (a rule named in the header such as "Total" or "Double") or from a well-known fact. Optional: up to 3 questions that need the table (compare, total, difference) — never one whose answer is just a blank or a printed cell.
 - shapes: shapeItems, 4–8 items drawn by code: {kind:"fraction", shape: circle|rectangle|bar, parts 2–12, shaded, ask: "name" (write the fraction) | "shade" (student shades it)}, {kind:"count", icon: ${CHART_ICONS.join('|')}, count 1–20}, {kind:"polygon", shape, ask: "sides" | "corners" | "name"}. Use ask "name" only for triangle, pentagon, hexagon, octagon or circle — a square is also a rectangle and a rhombus.
 - chart: chart + questions (${qMin}–${qMax}). Picture graph (≤${CHART_LIMITS.pictograph.maxCategories} categories, values ≤${CHART_LIMITS.pictograph.maxValue}), bar graph (≤${CHART_LIMITS.bar.maxCategories} bars, values ≤${CHART_LIMITS.bar.maxValue}) or table (≤${CHART_LIMITS.table.maxCategories} rows); whole numbers; icon for picture graphs. Every question is answered by reading the chart. Never pie/line/double-bar graphs.
 - activity_art: a colouring page. subject (one simple thing to colour) + instruction (one sentence, e.g. "Colour the picture.") + tasks (0–3 short lines, e.g. "Write the word moon three times."). Use it only when the page description is a colouring or drawing page.
@@ -361,7 +361,7 @@ export function normalizeHybridPage(raw) {
     case 'labeling': {
       const labels = dedupeBy(arr(raw.labels).map(l => ({ word: s(l.word), clue: s(l.clue) })), l => norm(l.word))
       if (labels.length > LIMITS.labels.max) repairs.push(`labeling trimmed to ${LIMITS.labels.max} labels`)
-      spec = { subject: s(raw.subject), labels: labels.slice(0, LIMITS.labels.max) }
+      spec = { subject: s(raw.subject) || s(raw.illustrationSubject), labels: labels.slice(0, LIMITS.labels.max) }
       break
     }
     case 'table_fill': {
@@ -393,7 +393,7 @@ export function normalizeHybridPage(raw) {
     }
     case 'activity_art': {
       const tasks = arr(raw.tasks).map(s).filter(Boolean).slice(0, LIMITS.tasks.max)
-      spec = { subject: s(raw.subject), instruction: s(raw.instruction), ...(tasks.length ? { tasks } : {}) }
+      spec = { subject: s(raw.subject) || s(raw.illustrationSubject), instruction: s(raw.instruction) || 'Colour the picture.', ...(tasks.length ? { tasks } : {}) }
       break
     }
     default:

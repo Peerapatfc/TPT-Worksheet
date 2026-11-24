@@ -100,6 +100,24 @@ describe('normalize + repair', () => {
   })
 })
 
+describe('regressions from live Groq runs', () => {
+  it('activity_art with its subject only in illustrationSubject is repaired, not retried', () => {
+    const n = normalizeHybridPage({ pageNum: 5, title: 'Color the Cat', layout: 'activity_art', illustrationSubject: 'a big friendly cat sitting on a mat', subject: null, instruction: '', tasks: null })
+    expect(n.spec).toEqual({ subject: 'a big friendly cat sitting on a mat', instruction: 'Colour the picture.' })
+    expect(validateHybridPage(n, opts())).toEqual([])
+  })
+
+  it('schema tolerates what gpt-oss writes into unused fields (chart: {}, options: "", categories as strings)', () => {
+    const props = hybridContentTool.function.parameters.properties.pages.items.properties
+    const chart = props.chart.anyOf[0]
+    expect(chart.required).toBeUndefined()
+    expect(chart.properties.categories.items.anyOf.map(a => a.type)).toEqual(['object', 'string'])
+    expect(props.questions.anyOf[0].items.properties.options.anyOf.map(a => a.type)).toEqual(['array', 'null', 'string'])
+    // and the normaliser treats them as absent
+    expect(normalizeHybridPage({ layout: 'matching', chart: {}, questions: '', pairs: raw.matching.pairs }).spec.pairs).toHaveLength(4)
+  })
+})
+
 describe('strict validation', () => {
   it('rejects unknown layouts, bad specs and too few questions', () => {
     expect(validateHybridPage(normalizeHybridPage({ layout: 'crossword' }), opts())).toEqual(['layout missing or not one of the allowed layouts'])
