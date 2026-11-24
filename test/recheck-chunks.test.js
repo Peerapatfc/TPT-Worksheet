@@ -86,3 +86,12 @@ describe('repairCharts', () => {
     expect(notes[1]).toMatch(/^p9:/)
   })
 })
+
+describe('recheckConcurrency', () => {
+  it('defaults to sequential and honours RECHECK_CONCURRENCY', async () => {
+    const { recheckConcurrency } = await import('../src/steps/generate-content.js')
+    expect(recheckConcurrency({})).toBe(1)
+    expect(recheckConcurrency({ RECHECK_CONCURRENCY: '3' })).toBe(3)
+    expect(recheckConcurrency({ RECHECK_CONCURRENCY: '0' })).toBe(1)
+  })
+})

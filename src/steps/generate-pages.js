@@ -7,6 +7,7 @@ import { recordUsage } from '../lib/cost-tracker.js'
 import { addReviewNote } from '../lib/review-notes.js'
 import { answerKeySvg, renderSvg } from '../lib/svg-templates.js'
 import { chartPageSvg, validateChart } from '../lib/chart-page.js'
+import { useHybridCover, renderHybridCover } from '../lib/hybrid-cover.js'
 import { validatePage } from './validate-page.js'
 import { reconcilePageContent } from './reconcile-content.js'
 
@@ -42,7 +43,8 @@ export const isChartPage = (page) =>
 export async function generatePages(plan) {
   const concurrency = parseInt(process.env.PAGE_CONCURRENCY ?? '1', 10) || 1
   const aiPages = plan.pages.filter(p => p.type !== 'answer_key' && !isChartPage(p))
-  const generated = await mapWithConcurrency(aiPages, concurrency, page => generateOnePage(plan, page))
+  const generated = await mapWithConcurrency(aiPages, concurrency, page =>
+    page.type === 'cover' ? generateCoverPage(plan, page) : generateOnePage(plan, page))
 
   let next = 0
   return Promise.all(plan.pages.map(async page => {
@@ -56,6 +58,30 @@ export async function generatePages(plan) {
     console.log(`Rendered answer key page ${page.pageNum}/${plan.pageCount}: ${page.filename}`)
     return { ...page, buffer }
   }))
+}
+
+/**
+ * Cover page. With COVER_RENDERER=hybrid and Cloudflare credentials, FLUX draws the
+ * illustration and code draws the text (no validate/reconcile: the text is exact and
+ * a cover has no questions). Fail-open: any hybrid error falls back to the
+ * gpt-image-2 path with a review note. Deps are injectable for tests.
+ */
+export async function generateCoverPage(plan, page, {
+  env = process.env,
+  hybrid = renderHybridCover,
+  legacy = generateOnePage,
+} = {}) {
+  if (useHybridCover(env)) {
+    try {
+      const buffer = await hybrid(plan)
+      console.log(`Rendered hybrid cover page ${page.pageNum}/${plan.pageCount}: ${page.filename} (FLUX + template)`)
+      return { ...page, buffer }
+    } catch (err) {
+      console.warn(`Hybrid cover failed (${err.message}) — falling back to gpt-image-2`)
+      addReviewNote('fallback', `Hybrid cover failed (${err.message}); cover drawn by gpt-image-2 instead`)
+    }
+  }
+  return legacy(plan, page)
 }
 
 async function generateOnePage(plan, page) {
