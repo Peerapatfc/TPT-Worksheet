@@ -111,7 +111,9 @@ describe('regressions from live Groq runs', () => {
     const props = hybridContentTool.function.parameters.properties.pages.items.properties
     const chart = props.chart.anyOf[0]
     expect(chart.required).toBeUndefined()
-    expect(chart.properties.categories.items.anyOf.map(a => a.type)).toEqual(['object', 'string'])
+    expect(chart.properties.categories.anyOf[0].items.anyOf.map(a => a.type)).toEqual(['object', 'string'])
+    // every chart key accepts null/"" (a null there must never fail the whole call)
+    for (const k of ['type', 'title', 'icon', 'categories']) expect(chart.properties[k].anyOf.map(a => a.type), k).toEqual(expect.arrayContaining(['null', 'string']))
     expect(props.questions.anyOf[0].items.properties.options.anyOf.map(a => a.type)).toEqual(['array', 'null', 'string', 'object'])
     // and the normaliser treats them as absent
     expect(normalizeHybridPage({ layout: 'matching', chart: {}, questions: '', pairs: raw.matching.pairs }).spec.pairs).toHaveLength(4)
@@ -423,6 +425,6 @@ describe('offline tuning (P3, round 2)', () => {
   it('sorting: too few valid items → re-asked with the exact categories and the word limit', () => {
     const n = normalizeHybridPage(fig([...good.slice(0, 4), { word: 'The wind sighed sadly through the old trees', category: 'Simile' }, { word: 'buzz', category: 'Onomatopoeia' }]))
     const issues = validateHybridPage(n, { packageType: 'small' })
-    expect(issues).toContain('sort items: use only the categories "Simile", "Metaphor" (spelled exactly) and keep each word to 1–3 words (a short simile or idiom may be up to 30 characters), never a sentence')
+    expect(issues[0]).toMatch(/^sort items: every category must be exactly one of "Simile", "Metaphor" \(spelled exactly\) and each word 1–3 words .*never a sentence\. Good: \{"word": "as busy as a bee", "category": "Simile"\}, \{"word": "time is money", "category": "Metaphor"\}\. Bad: \{"word": "The wind sighed sadly through the old trees", "category": "Simile"\} \(a sentence, not 1–3 words \(≤30 chars\)\), \{"word": "buzz", "category": "Onomatopoeia"\} \(category not in the list\)$/)
   })
 })

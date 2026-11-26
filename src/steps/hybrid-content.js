@@ -141,16 +141,20 @@ export const hybridContentTool = {
                 type: 'object',
                 description: 'chart only',
                 properties: {
-                  type: { type: 'string', enum: CHART_TYPES },
-                  title: { type: 'string' },
+                  // Every key nullable: a chart field written as null/"" on any page
+                  // must never fail the whole call; validateChart enforces chart pages.
+                  type: orNull({ type: 'string', enum: CHART_TYPES }),
+                  title: orNull({ type: 'string' }),
                   icon: orNull({ type: 'string', enum: CHART_ICONS }),
                   unit: orNull({ type: 'string' }),
                   labelHeader: orNull({ type: 'string' }),
                   valueHeader: orNull({ type: 'string' }),
-                  categories: {
+                  // value may arrive as "4" or 4.0: normalizeChart reads it; a strict
+                  // integer here failed the whole call (400 tool_use_failed).
+                  categories: orNull({
                     type: 'array',
-                    items: { anyOf: [{ type: 'object', properties: { label: { type: 'string' }, value: { type: 'integer' } }, required: ['label', 'value'] }, { type: 'string' }] },
-                  },
+                    items: { anyOf: [{ type: 'object', properties: { label: { type: 'string' }, value: { anyOf: [{ type: 'integer' }, { type: 'number' }, { type: 'string' }] } }, required: ['label', 'value'] }, { type: 'string' }] },
+                  }),
                 },
                 // No required keys: gpt-oss writes `chart: {}` on non-chart pages, and a
                 // required key there fails the whole call (400 tool_use_failed).
@@ -186,6 +190,9 @@ export function suggestLayout(page) {
 }
 
 // ── Prompt ───────────────────────────────────────────────────────────────────
+// The exact chart shape, used by the prompt and by the "chart missing" retry hint.
+const CHART_SHAPE = `"chart": {"type": "pictograph" | "bar" | "table", "title": "…", "icon": "${CHART_ICONS.join('" | "')}" (pictograph only), "categories": [{"label": "Apples", "value": 4}, {"label": "Pears", "value": 2}]} — 2+ categories, whole-number values (pictograph ≤${CHART_LIMITS.pictograph.maxCategories} categories and ≤${CHART_LIMITS.pictograph.maxValue}, bar ≤${CHART_LIMITS.bar.maxCategories} and ≤${CHART_LIMITS.bar.maxValue}, table ≤${CHART_LIMITS.table.maxCategories} rows)`
+
 export function questionRange(packageType) {
   return packageType === 'free' ? [4, 5] : packageType === 'large' ? [5, 8] : [4, 6]
 }
@@ -207,12 +214,12 @@ Every page is typeset by code from the structured data you return. Pick ONE layo
 - multiple_choice: questions [{num, question, options (2–4), answer}], ${qMin}–${qMax} items — the questions list is never empty, and each item carries its own options. answer = the letter (A–D) of the one correct option; options distinct.
 - fill_blank: wordBank (the answers, ≤3 words each) + sentences [{num, sentence, answer}], ${qMin}–${qMax} items. Each sentence contains "___" where its answer goes and never contains the answer itself; every answer is in wordBank.
 - matching: pairs [{term, match}], 4–8 pairs. term ≤${LIMITS.term} chars, match ≤12 words (a definition, unique fact or word). Code shuffles the right column.
-- sorting: categories (2–3 headings) + sortItems [{word, category}], 6–12 items, each category used at least twice. Each word is 1–3 words (a short simile or idiom such as "as busy as a bee" may be up to ${LIMITS.word} characters), never a whole sentence, and its category is spelled exactly as one of the headings.
+- sorting: categories (a list of 2–3 heading strings, e.g. ["Living", "Nonliving"]) + sortItems [{word, category}], 6–12 items, each category used at least twice. Each word is 1–3 words (a short simile or idiom such as "as busy as a bee" may be up to ${LIMITS.word} characters), never a whole sentence, and its category is spelled exactly as one of the headings.
 - labeling: subject (one concrete thing drawn large, e.g. "a sunflower plant") + labels [{word, clue}], 4–6 labels. The student writes the word from the word bank next to each numbered clue. A clue describes the part's job or look in words and never contains its word.
 - table_fill: columns (2–4 headers) + rows (3–6 rows, each the same length as columns). A blank cell is written as its answer in square brackets, e.g. ["Cat", "4", "[8]"]. Every blank must follow from the rest of its row (a rule named in the header such as "Total" or "Double") or from a well-known fact. Optional: up to 3 questions that need the table (compare, total, difference) — never one whose answer is just a blank or a printed cell.
 - shapes: shapeItems, 4–8 items drawn by code: {kind:"fraction", shape: circle|rectangle|bar, parts 2–12, shaded, ask: "name" (write the fraction) | "shade" (student shades it)}, {kind:"count", icon: ${CHART_ICONS.join('|')}, count 1–20}, {kind:"polygon", shape, ask: "sides" | "corners" | "name"}. Use ask "name" only for triangle, pentagon, hexagon, octagon or circle — a square is also a rectangle and a rhombus.
-- chart: chart + questions (${qMin}–${qMax}). Picture graph (≤${CHART_LIMITS.pictograph.maxCategories} categories, values ≤${CHART_LIMITS.pictograph.maxValue}), bar graph (≤${CHART_LIMITS.bar.maxCategories} bars, values ≤${CHART_LIMITS.bar.maxValue}) or table (≤${CHART_LIMITS.table.maxCategories} rows); whole numbers; icon for picture graphs. Every question is answered by reading the chart. Never pie/line/double-bar graphs.
-- activity_art: a colouring page. subject (one simple thing to colour) + instruction (one sentence, e.g. "Colour the picture.") + tasks (0–3 short lines, e.g. "Write the word moon three times."). Use it only when the page description is a colouring or drawing page.
+- chart: chart + questions (${qMin}–${qMax}). Picture graph (≤${CHART_LIMITS.pictograph.maxCategories} categories, values ≤${CHART_LIMITS.pictograph.maxValue}), bar graph (≤${CHART_LIMITS.bar.maxCategories} bars, values ≤${CHART_LIMITS.bar.maxValue}) or table (≤${CHART_LIMITS.table.maxCategories} rows); whole numbers; icon for picture graphs. Every question is answered by reading the chart. Never pie/line/double-bar graphs. A chart page ALWAYS has its chart object: ${CHART_SHAPE}.
+- activity_art: a colouring page. subject (one simple thing to colour) + instruction (one sentence, e.g. "Colour the picture.") + tasks (0–3 short lines, e.g. "Write the word moon three times."). Use it only when the page description is a colouring or drawing page. Another AI draws the picture and you never see it, so every task must work on ANY picture of the subject: "Colour the biggest thing.", "Write one word about the picture.", "Draw 3 stars around it." Never name a part or detail of the drawing, never give a part its colour ("Colour the cat's collar blue", "Colour the wings of the bee"), never "Draw a hat on the cat", and never count things in the drawing — count only things the task itself states.
 
 Use the suggested layout unless the page description clearly fits another one. Crosswords, word searches, mazes and dot-to-dot are not possible — use matching, fill_blank or labeling on the same content.
 
@@ -406,6 +413,23 @@ export function sortingIssues(spec = {}) {
   return issues
 }
 
+const sortExample = (it) => `{"word": "${it.word}", "category": "${it.category}"}`
+/**
+ * Retry hint for a sorting page whose items do not fit: the exact category list,
+ * the word limit, and two good / two bad items from the page itself ('' = all fit). Pure.
+ */
+export function sortingHint(spec = {}) {
+  const cats = spec.categories ?? []
+  const items = spec.items ?? []
+  const fits = sortItemFits(cats)
+  const bad = items.filter(it => !fits(it))
+  if (cats.length && !bad.length) return ''
+  if (!cats.length) return 'sorting: "categories" was empty — return 2–3 column headings as a list of strings (e.g. ["Living", "Nonliving"]) and give every sort item one of them, spelled exactly'
+  const why = (it) => (!it.word ? 'empty word' : it.word.length > LIMITS.word ? `a sentence, not 1–3 words (≤${LIMITS.word} chars)` : 'category not in the list')
+  const good = items.filter(fits).slice(0, 2)
+  return `sort items: every category must be exactly one of ${cats.map(c => `"${c}"`).join(', ')} (spelled exactly) and each word 1–3 words (a short simile or idiom may be up to ${LIMITS.word} characters), never a sentence. ${good.length ? `Good: ${good.map(sortExample).join(', ')}. ` : ''}Bad: ${bad.slice(0, 2).map(it => `${sortExample(it)} (${why(it)})`).join(', ')}`
+}
+
 /** Every student-facing string of a page's raw content, with a label for error messages. Pure. */
 function studentTexts(layout, spec, questions) {
   const out = []
@@ -415,6 +439,161 @@ function studentTexts(layout, spec, questions) {
   if (layout === 'labeling') spec.labels?.forEach((l, i) => add(`clue ${i + 1}`, l.clue))
   if (layout === 'activity_art') { add('instruction', spec.instruction); spec.tasks?.forEach((t, i) => add(`task ${i + 1}`, t)) }
   return out
+}
+
+// ── activity_art: tasks that need a specific drawn detail ────────────────────
+// The FLUX picture is generic, so "Colour the cat's collar blue" may have no collar
+// to colour. Only activity_art tasks/instruction are checked with these (stricter
+// than isPictureDependent); each pattern needs a named part, a part's colour, an
+// object drawn ON the picture, or a count with no number stated in the task.
+const COLOURS = 'red|orange|yellow|green|blue|purple|violet|pink|brown|black|grey|gray|gold|silver|white'
+const NOT_A_PART = '(?!(?:picture|page|drawing|image|illustration|whole|rest|background|border|frame)\\b)'
+const ACTIVITY_DETAIL = [
+  // "Colour the cat's collar", "Circle the bee's wings"
+  /\b(?:colou?r|paint|shade|circle|trace|outline|decorate|draw)\b[^.?!]*\b\p{L}+['’]s \p{L}+/iu,
+  // "Colour the wings of the bee", "Colour the spots on the ladybug"
+  new RegExp(`\\b(?:colou?r|paint|shade|circle|trace|outline)\\b (?:the|its|each|every|all(?: the)?) ${NOT_A_PART}\\p{L}+ (?:of|on|in) (?:the|its|his|her|their)\\b`, 'iu'),
+  // "Draw a hat on the cat"
+  /\bdraw (?:a|an|some|one|two|three|four|five|\d+|more) [^.?!]{1,30}? on (?:the|its|his|her|their)\b/i,
+  // "Use blue for the sky"
+  new RegExp(`\\buse (?:${COLOURS}) (?:for|on|to colou?r) (?:the|its)\\b`, 'i'),
+]
+const COUNTS = /\b(?:count|how many)\b/i
+const STATED_NUMBER = /\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty)\b/i
+/** True if an activity_art task/instruction needs a specific detail of the drawn picture. Pure — exported for unit testing. */
+export function isPictureDetailTask(text) {
+  const t = String(text ?? '')
+  return ACTIVITY_DETAIL.some(re => re.test(t)) || (COUNTS.test(t) && !STATED_NUMBER.test(t))
+}
+const artTextDependent = (t) => isPictureDependent(t) || isPictureDetailTask(t)
+const DEFAULT_ART_INSTRUCTION = 'Colour the picture.'
+const ART_HINT = 'activity_art tasks must work on ANY picture of the subject (another AI draws it and you never see it), e.g. "Colour the biggest thing.", "Write one word about the picture.", "Draw 3 stars around it." — never name a part or detail, never give a part a colour, never count things in the drawing'
+
+/**
+ * An activity_art attempt with its picture-dependent tasks dropped and a
+ * picture-dependent instruction replaced by "Colour the picture." (tasks are
+ * optional, so this never changes what the page is). Null if nothing changes. Pure.
+ */
+export function repairActivityArt(n) {
+  if (n?.layout !== 'activity_art') return null
+  const tasks = (n.spec.tasks ?? []).filter(t => !artTextDependent(t))
+  const instrBad = artTextDependent(n.spec.instruction)
+  const dropped = (n.spec.tasks?.length ?? 0) - tasks.length
+  if (!dropped && !instrBad) return null
+  const { tasks: _t, ...rest } = n.spec
+  const spec = { ...rest, instruction: instrBad ? DEFAULT_ART_INSTRUCTION : n.spec.instruction, ...(tasks.length ? { tasks } : {}) }
+  const what = [dropped ? `dropped ${dropped} task(s)` : '', instrBad ? 'replaced the instruction' : ''].filter(Boolean).join(' and ')
+  return { ...n, spec, repairs: [...(n.repairs ?? []), `activity_art: ${what} that needed a detail of the picture`] }
+}
+
+// ── chart: find the chart object wherever the model put it ───────────────────
+const CHART_TYPE_ALIASES = [
+  [/^(?:pictograph|picto ?gram|picture ?(?:graph|chart))$/, 'pictograph'],
+  [/^bar(?: ?(?:graph|chart))?$/, 'bar'],
+  [/^(?:(?:data|frequency) )?table$|^tally(?: chart| table)?$/, 'table'],
+]
+const chartTypeOf = (v) => {
+  const t = norm(v).replace(/[_-]+/g, ' ')
+  return CHART_TYPE_ALIASES.find(([re]) => re.test(t))?.[1] ?? (t || undefined)
+}
+const chartValue = (v) => {
+  if (typeof v === 'number') return v
+  const m = String(v ?? '').match(/^\s*(\d+(?:\.\d+)?)\b/)
+  return m ? Number(m[1]) : NaN
+}
+const parseJsonObject = (v) => {
+  if (typeof v !== 'string' || !/^\s*\{/.test(v)) return v
+  try { return JSON.parse(v) } catch { return null }
+}
+/** Chart categories in any shape the model writes → [{ label, value }] ([] if none). */
+function chartCategories(c) {
+  let cats = c?.categories ?? c?.data ?? c?.values
+  if (typeof cats === 'string' && /^\s*[[{]/.test(cats)) { try { cats = JSON.parse(cats) } catch { cats = [] } }
+  // { "Apples": 4, "Pears": 2 }
+  if (cats && typeof cats === 'object' && !Array.isArray(cats) && !toList(cats).length) {
+    return Object.entries(cats).map(([label, value]) => ({ label: s(label), value: chartValue(value) }))
+  }
+  // labels: [...] + values: [...] side by side
+  if (!arr(cats).length && Array.isArray(c?.labels) && Array.isArray(c?.values)) {
+    return c.labels.map((label, i) => ({ label: s(label), value: chartValue(c.values[i]) }))
+  }
+  return arr(cats).map(x => {
+    // "Mercury: 3" strings → { label, value }
+    if (typeof x === 'string') {
+      const m = x.match(/^(.*?)[\s:=–-]+(\d+)\s*$/)
+      return m ? { label: s(m[1]), value: Number(m[2]) } : { label: s(x), value: NaN }
+    }
+    if (!x || typeof x !== 'object') return { label: '', value: NaN }
+    return { label: s(x.label ?? x.name ?? x.category ?? x.item), value: chartValue(x.value ?? x.count ?? x.amount ?? x.number) }
+  })
+}
+const looksLikeChartData = (cats) => cats.length >= 2 && cats.every(c => c.label && Number.isFinite(c.value))
+
+/**
+ * The chart of a chart page from its raw content: `chart` as an object or a JSON
+ * string, with type aliases ("picture graph", "bar chart"), categories as a list,
+ * "Label: 4" strings, a { label: value } map or labels + values arrays, and string
+ * values ("4"). If `chart` is absent/null, chart fields the model wrote on the page
+ * itself (chartType, categories with values, data) are lifted. A missing type is
+ * inferred (pictograph when it fits and has an icon, else bar; repairChart turns an
+ * over-limit bar into a table). Returns { chart, lifted? } or null. Pure.
+ */
+export function normalizeChart(raw) {
+  let c = parseJsonObject(raw?.chart)
+  let lifted = null
+  if (!c || typeof c !== 'object' || Array.isArray(c) || !chartCategories(c).length) {
+    const page = { ...raw, type: raw?.chartType ?? raw?.graphType ?? c?.type, categories: raw?.chartData ?? raw?.data ?? raw?.categories ?? c?.categories }
+    if (looksLikeChartData(chartCategories(page))) {
+      c = { type: page.type, title: raw?.chartTitle ?? c?.title, icon: raw?.icon ?? c?.icon, categories: page.categories }
+      lifted = 'chart data written outside the chart object was moved into it'
+    } else if (!c || typeof c !== 'object' || Array.isArray(c) || !Object.keys(c).length) return null
+  }
+  const categories = chartCategories(c)
+  let type = chartTypeOf(c.type ?? c.chartType ?? c.kind)
+  if (!type) {
+    const p = CHART_LIMITS.pictograph
+    type = CHART_ICONS.includes(c.icon) && categories.length <= p.maxCategories && categories.every(x => x.value <= p.maxValue) ? 'pictograph' : 'bar'
+    lifted = [lifted, `chart type missing — drawn as a ${type}`].filter(Boolean).join('; ')
+  }
+  const chart = Object.fromEntries(Object.entries({
+    type,
+    title: s(c.title) || s(raw?.title),
+    icon: c.icon,
+    unit: c.unit,
+    labelHeader: c.labelHeader,
+    valueHeader: c.valueHeader,
+    categories,
+  }).filter(([, v]) => has(v) && v !== ''))
+  return lifted ? { chart, lifted } : { chart }
+}
+
+// ── sorting: categories and items in any shape, near-matching names ──────────
+const catLabel = (c) => (c && typeof c === 'object' && !Array.isArray(c) ? (c.name ?? c.label ?? c.category ?? c.heading ?? c.title) : c)
+// A plain "Living, Nonliving" string is a list too (toList only reads JSON).
+const stringList = (v) => (typeof v === 'string' && !/^\s*[[{]/.test(v) ? v.split(/\s*(?:[,;|\n]|\s\/\s)\s*/) : arr(v))
+const catWords = (v) => norm(v).replace(/[^\p{L}\p{N}\s]/gu, ' ').trim().replace(/^(?:the|a|an) /, '').split(/\s+/).filter(Boolean)
+const wordForms = (w) => new Set([w, w.replace(/ies$/, 'y'), w.replace(/es$/, ''), w.replace(/s$/, '')].filter(Boolean))
+/** True if two category names are the same heading up to case, spacing, punctuation and plural ("Similes" ≈ "simile"). Pure. */
+export function sameCategory(a, b) {
+  const x = catWords(a)
+  const y = catWords(b)
+  if (!x.length || x.length !== y.length) return false
+  return x.every((w, i) => { const f = wordForms(w); return [...wordForms(y[i])].some(v => f.has(v)) })
+}
+/** The listed category a model-written one means: exact (case-insensitive) first, else the one near match. */
+const resolveCategory = (categories, c) => categories.find(x => norm(x) === norm(c)) ?? (() => { const near = categories.filter(x => sameCategory(x, c)); return near.length === 1 ? near[0] : undefined })()
+/** Raw sort items in any shape: [{word, category}], {"Simile": [...]}, [{category, words: [...]}]. */
+function rawSortItems(raw) {
+  const src = raw.sortItems ?? raw.items
+  if (src && typeof src === 'object' && !Array.isArray(src) && !toList(src).length) {
+    return Object.entries(src).flatMap(([category, words]) => stringList(words).map(word => ({ word, category })))
+  }
+  return arr(src).flatMap(it => {
+    if (typeof it === 'string') return [{ word: it, category: '' }]
+    const words = it.words ?? it.items
+    if (Array.isArray(words)) return words.map(word => ({ word, category: it.category ?? it.name ?? it.heading }))
+    return [it]
+  })
 }
 
 const parseCell = (c) => {
@@ -445,17 +624,14 @@ export function normalizeHybridPage(raw) {
     case 'questions':
     case 'chart':
       questions = qs.map(({ options, ...q }) => q)
-      if (layout === 'chart' && raw.chart && typeof raw.chart === 'object') {
-        // "Mercury: 3" strings → { label, value }; null optional fields dropped.
-        const cats = arr(raw.chart.categories).map(c => {
-          if (typeof c !== 'string') return c
-          const m = c.match(/^(.*?)[\s:=–-]+(\d+)\s*$/)
-          return m ? { label: s(m[1]), value: Number(m[2]) } : { label: s(c), value: NaN }
-        })
-        const base = Object.fromEntries(Object.entries({ ...raw.chart, categories: cats }).filter(([, v]) => has(v) && v !== ''))
-        const { chart, changed } = repairChart(base)
-        if (changed && chart) repairs.push('chart outside the bar/picture-graph limits was drawn as a table')
-        spec = { chart: chart ?? raw.chart }
+      if (layout === 'chart') {
+        const found = normalizeChart(raw)
+        if (found) {
+          if (found.lifted) repairs.push(found.lifted)
+          const { chart, changed } = repairChart(found.chart)
+          if (changed && chart) repairs.push('chart outside the bar/picture-graph limits was drawn as a table')
+          spec = { chart: chart ?? found.chart }
+        }
       }
       break
     case 'multiple_choice': {
@@ -498,13 +674,34 @@ export function normalizeHybridPage(raw) {
       break
     }
     case 'sorting': {
-      const categories = dedupeBy(arr(raw.categories).map(s).filter(Boolean), norm)
-      let items = dedupeBy(arr(raw.sortItems ?? raw.items).map(it => {
-        const cat = categories.find(c => norm(c) === norm(it.category))
-        return { word: s(it.word), category: cat ?? s(it.category) }
+      let categories = dedupeBy(stringList(raw.categories).map(c => s(catLabel(c))).filter(Boolean), norm)
+      const rawItems = rawSortItems(raw)
+      // No heading list: use the categories the items name, when they form a valid set
+      // (2–max distinct headings, each used at least twice).
+      if (!categories.length) {
+        const groups = []
+        for (const it of rawItems) {
+          const c = s(catLabel(it?.category))
+          if (!c) continue
+          const g = groups.find(x => sameCategory(x.name, c) || norm(x.name) === norm(c))
+          if (g) g.n++
+          else groups.push({ name: c, n: 1 })
+        }
+        if (groups.length >= LIMITS.categories.min && groups.length <= LIMITS.categories.max && groups.every(g => g.n >= 2)) {
+          categories = groups.map(g => g.name)
+          repairs.push(`categories list was empty — used the items' categories (${categories.join(', ')})`)
+        }
+      }
+      let renamed = 0
+      let items = dedupeBy(rawItems.map(it => {
+        const given = s(catLabel(it?.category))
+        const cat = resolveCategory(categories, given)
+        if (cat && norm(cat) !== norm(given)) renamed++
+        return { word: s(it?.word), category: cat ?? given }
       // Keyed by word + category: a word filed under two categories survives so the
       // validator can reject it (ambiguous) instead of silently keeping the first.
       }), it => (norm(it.word) ? `${norm(it.word)}|${norm(it.category)}` : ''))
+      if (renamed) repairs.push(`${renamed} sort item category name(s) matched to the listed heading (case/plural/spacing)`)
       // An item that is empty, over LIMITS.word (a whole sentence) or filed under a
       // category not in the list is dropped — never truncated or re-filed, which would
       // change its meaning — when SORT_KEEP_MIN items remain; else the page is re-asked.
@@ -584,17 +781,21 @@ export function validateHybridPage(norm_, { packageType = 'small', plan = null, 
       if (spec.wordBank.some(w => w.length > LIMITS.word)) issues.push(`word bank entries must be ≤${LIMITS.word} chars`)
     }
     if (layout === 'chart') {
-      if (!spec.chart) issues.push('chart missing')
-      else for (const i of validateChart(spec.chart)) issues.push(i)
+      // First, so the retry hint survives the 6-issue feedback cap.
+      if (!spec.chart) issues.unshift(`chart missing — return ${CHART_SHAPE}`)
+      else {
+        const ci = validateChart(spec.chart)
+        if (ci.length) issues.unshift(...ci, `chart must be ${CHART_SHAPE}`)
+      }
     }
   } else {
     issues.push(...validateLayoutSpec(layout, spec))
     if (layout === 'matching') issues.push(...matchingIssues(spec.pairs))
     if (layout === 'sorting') {
       issues.push(...sortingIssues(spec))
-      if ((spec.items ?? []).some(it => !sortItemFits(spec.categories ?? [])(it))) {
-        issues.push(`sort items: use only the categories ${(spec.categories ?? []).map(c => `"${c}"`).join(', ')} (spelled exactly) and keep each word to 1–3 words (a short simile or idiom may be up to ${LIMITS.word} characters), never a sentence`)
-      }
+      const hint = sortingHint(spec)
+      // First, so the hint survives the 6-issue feedback cap (specs.js lists every item).
+      if (hint) issues.unshift(hint)
     }
     if (layout === 'multiple_choice' && !spec.questions?.length) issues.push(`the questions list was empty — return ${qMin}–${qMax} multiple-choice questions in "questions", each with its own options (2–4) and the answer letter`)
     else if (layout === 'multiple_choice' && spec.questions.length < minQ) issues.push(`only ${spec.questions.length} questions (min ${minQ})`)
@@ -607,7 +808,10 @@ export function validateHybridPage(norm_, { packageType = 'small', plan = null, 
     for (const q of asked ?? []) if (readsOtherPageContent(q.question)) issues.push(`q${q.num} refers to something not printed on the page (a story, list, row or icon): "${q.question.slice(0, 80)}"`)
   }
   if (layout !== 'chart' && layout !== 'shapes') {
-    for (const [label, t] of studentTexts(layout, spec, asked)) if (isPictureDependent(t)) issues.push(`${label} depends on the picture: "${t.slice(0, 80)}"`)
+    const dependent = layout === 'activity_art' ? artTextDependent : isPictureDependent
+    const pic = studentTexts(layout, spec, asked).filter(([, t]) => dependent(t)).map(([label, t]) => `${label} depends on the picture: "${t.slice(0, 80)}"`)
+    if (pic.length && layout === 'activity_art') issues.unshift(ART_HINT, ...pic)
+    else issues.push(...pic)
   }
   if (!issues.length && plan && page && layout !== 'chart') {
     try {
@@ -1050,6 +1254,14 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
       }
     }
     const tried = attempts.get(page.pageNum)
+    // A colouring page whose tasks kept naming drawn details: ship the latest attempt
+    // without those tasks (they are optional) rather than lose the colouring page.
+    const art = [...tried].reverse().map(t => ({ t, n: repairActivityArt(t) })).find(({ t, n }) => n && validateHybridPage(n, opts({ ...page, title: s(t.raw?.title) })).length === 0)
+    if (art) {
+      done.set(page.pageNum, { content: hybridPageContent(art.t.raw, art.n), repairs: art.n.repairs })
+      addReviewNote('fallback', `p${page.pageNum}: activity_art tasks kept naming details of the picture after ${HYBRID_MAX_ATTEMPTS} attempts — ${art.n.repairs.at(-1).replace(/^activity_art: /, '')}`)
+      continue
+    }
     const fb = questionsFallback(tried, opts({ ...page, title: s(tried[0]?.raw?.title) }))
     if (fb) {
       const raw = tried[0].raw
