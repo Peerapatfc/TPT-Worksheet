@@ -62,6 +62,8 @@ jobs:
           PAGE_RENDERER:               ${{ vars.PAGE_RENDERER }}
           ILLUSTRATION_CONCURRENCY:    ${{ vars.ILLUSTRATION_CONCURRENCY }}
           MARKET_CHECK_SEARCH_DAY:     ${{ vars.MARKET_CHECK_SEARCH_DAY }}
+          GROQ_FALLBACK:               ${{ vars.GROQ_FALLBACK }}
+          GEMINI_API_KEY:              ${{ secrets.GEMINI_API_KEY }}
 
       - name: Upload logs
         if: always()
