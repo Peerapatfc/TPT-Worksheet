@@ -10,6 +10,7 @@ export const MODELS = {
   brainstorm: 'gpt-4o', // OpenAI (default; BRAINSTORM_PROVIDER=openai)
   brainstormGroq: 'openai/gpt-oss-120b', // Groq free tier (BRAINSTORM_PROVIDER=groq)
   content: 'openai/gpt-oss-120b', // Groq (llama-3.3-70b-versatile was retired 2026-08-16)
+  groqFallbackGemini: 'gemini-3.5-flash-lite', // Gemini free tier: opt-in replay after Groq's daily limit (GROQ_FALLBACK=gemini)
   validate: 'gpt-4o-mini', // OpenAI vision
   reconcile: 'gpt-4o-mini', // OpenAI vision
   image: 'gpt-image-2', // OpenAI images
@@ -52,6 +53,8 @@ export const PRICING = {
   'gpt-4o-mini': { input: 0.15, output: 0.6 },
   'gpt-image-2': { input: 5, output: 30 },
   'openai/gpt-oss-120b': { input: 0.15, output: 0.75 },
+  // Gemini free tier (GROQ_FALLBACK=gemini): no charge; prompts may be used by Google for training.
+  'gemini-3.5-flash-lite': { input: 0, output: 0 },
   // Billed in neurons (~96/image) inside the Workers AI free allocation; calls are counted, USD 0.
   '@cf/black-forest-labs/flux-1-schnell': { input: 0, output: 0 },
 }

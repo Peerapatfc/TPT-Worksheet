@@ -253,7 +253,7 @@ Call the generate_worksheet_plan function with the complete plan.`
       tool_choice: { type: 'function', function: { name: 'generate_worksheet_plan' } },
       messages,
     }), { label: llm.label })
-    recordUsage('brainstorm', llm.model, result.usage)
+    recordUsage('brainstorm', result.servedBy ?? llm.model, result.usage)
 
     const assistantMsg = result.choices[0].message
     const toolCall = assistantMsg.tool_calls?.[0]
