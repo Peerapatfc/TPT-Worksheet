@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
-  suggestLayout, buildHybridContentPrompt, hybridContentTool, normalizeHybridPage, validateHybridPage,
+  suggestLayout, buildHybridContentPrompt, hybridContentTool, normalizeHybridPage, validateHybridPage, toList,
   isPictureDependent, readsOtherPageContent, hybridPageContent, questionsFallback, generateHybridPages,
   generateHybridContent, recheckItems, applyHybridCorrections, HYBRID_PAGES_PER_CALL,
 } from '../src/steps/hybrid-content.js'
@@ -112,7 +112,7 @@ describe('regressions from live Groq runs', () => {
     const chart = props.chart.anyOf[0]
     expect(chart.required).toBeUndefined()
     expect(chart.properties.categories.items.anyOf.map(a => a.type)).toEqual(['object', 'string'])
-    expect(props.questions.anyOf[0].items.properties.options.anyOf.map(a => a.type)).toEqual(['array', 'null', 'string'])
+    expect(props.questions.anyOf[0].items.properties.options.anyOf.map(a => a.type)).toEqual(['array', 'null', 'string', 'object'])
     // and the normaliser treats them as absent
     expect(normalizeHybridPage({ layout: 'matching', chart: {}, questions: '', pairs: raw.matching.pairs }).spec.pairs).toHaveLength(4)
   })
@@ -298,3 +298,46 @@ describe('routing + rendering hybrid content end to end (FLUX stubbed)', () => {
     }
   })
 })
+
+describe('lenient list fields (Groq 400 tool_use_failed / validation failures)', () => {
+  const props = hybridContentTool.function.parameters.properties.pages.items.properties
+  it('schema: item num is optional and may be a string or null; list fields also accept an object', () => {
+    const q = props.questions.anyOf[0].items
+    expect(q.required).toEqual(['question', 'answer'])
+    expect(q.properties.num.anyOf.map(a => a.type)).toEqual(['integer', 'string', 'null'])
+    expect(props.sentences.anyOf[0].items.required).toEqual(['sentence', 'answer'])
+    for (const k of ['questions', 'sentences', 'pairs', 'sortItems', 'labels', 'shapeItems', 'rows', 'wordBank']) {
+      expect(props[k].anyOf.map(a => a.type), k).toEqual(['array', 'null', 'string', 'object'])
+    }
+    // non-list optional fields gain no object alternative
+    expect(props.illustrationSubject.anyOf.map(a => a.type)).toEqual(['string', 'null', 'string'])
+  })
+
+  it('questions without num are numbered by position', () => {
+    const n = normalizeHybridPage({ layout: 'questions', questions: [{ question: 'How many legs does a spider have?', answer: '8' }, { num: '7', question: 'What do bees make?', answer: 'Honey' }, { num: null, question: 'What do caterpillars become?', answer: 'Butterflies' }] })
+    expect(n.questions.map(q => q.num)).toEqual([1, 2, 3])
+    const fb = normalizeHybridPage({ layout: 'fill_blank', sentences: [{ sentence: 'Bees make ___.', answer: 'honey' }, { sentence: 'A spider has ___ legs.', answer: 'eight' }] })
+    expect(fb.questions.map(q => q.num)).toEqual([1, 2])
+  })
+
+  it('questions written as an object keyed by index/num become an array sorted by key', () => {
+    const n = normalizeHybridPage({ layout: 'questions', questions: { 10: { question: 'Q ten?', answer: 'c' }, 2: { question: 'Q two?', answer: 'b' }, 1: { question: 'Q one?', answer: 'a' } } })
+    expect(n.questions).toEqual([{ num: 1, question: 'Q one?', answer: 'a' }, { num: 2, question: 'Q two?', answer: 'b' }, { num: 3, question: 'Q ten?', answer: 'c' }])
+    const q = normalizeHybridPage({ layout: 'questions', questions: { q2: { question: 'B?', answer: 'b' }, q1: { question: 'A?', answer: 'a' } } })
+    expect(q.questions.map(x => x.question)).toEqual(['A?', 'B?'])
+    const mc = normalizeHybridPage({ layout: 'multiple_choice', questions: [{ question: 'Pick', options: { B: 'dog', A: 'cat' }, answer: 'A' }] })
+    expect(mc.spec.questions[0].options).toEqual(['cat', 'dog'])
+    const m = normalizeHybridPage({ layout: 'matching', pairs: Object.fromEntries(raw.matching.pairs.map((p, i) => [String(i + 1), p])) })
+    expect(m.spec.pairs).toHaveLength(raw.matching.pairs.length)
+  })
+
+  it('toList: arrays as-is; a single item object or a non-index-keyed object is not a list', () => {
+    expect(toList([1, 2])).toEqual([1, 2])
+    expect(toList({ num: 1, question: 'x', answer: 'y' })).toEqual([])
+    expect(toList({ Mercury: 3 })).toEqual([])
+    expect(toList(null)).toEqual([])
+    expect(toList('')).toEqual([])
+    expect(toList({ item_2: 'b', item_1: 'a' })).toEqual(['a', 'b'])
+  })
+})
+

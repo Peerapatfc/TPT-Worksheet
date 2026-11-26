@@ -45,11 +45,18 @@ const looseEnums = (s) => {
   if (s.enum) out.description = `${s.description ? `${s.description}; ` : ''}one of: ${s.enum.join(', ')}`
   return out
 }
+// List fields also accept an object: gpt-oss sometimes writes a list keyed by index
+// or num ({"1": {...}, "2": {...}}); toList turns it back into an array.
 const orNull = (s) => {
   const typed = looseEnums(s)
   const { description, ...rest } = typed
-  return { ...(description ? { description } : {}), anyOf: [rest, { type: 'null' }, { type: 'string' }] }
+  const alts = [rest, { type: 'null' }, { type: 'string' }]
+  if (rest.type === 'array') alts.push({ type: 'object' })
+  return { ...(description ? { description } : {}), anyOf: alts }
 }
+// Item numbers are optional and may be strings: code renumbers by position, and a
+// missing or "1" num must never fail the whole call (400 tool_use_failed).
+const itemNum = { anyOf: [{ type: 'integer' }, { type: 'string' }, { type: 'null' }] }
 const strArr = (description) => orNull({ type: 'array', items: { type: 'string' }, description })
 const SHAPE_NAMES = [...new Set([...Object.keys(POLYGONS), ...FRACTION_SHAPES])]
 
@@ -76,19 +83,19 @@ export const hybridContentTool = {
                 items: {
                   type: 'object',
                   properties: {
-                    num: { type: 'integer' },
+                    num: itemNum,
                     question: { type: 'string' },
                     options: strArr('multiple_choice only: 2–4 choices'),
                     answer: { type: 'string' },
                   },
-                  required: ['num', 'question', 'answer'],
+                  required: ['question', 'answer'],
                 },
               }),
               wordBank: strArr('fill_blank'),
               sentences: orNull({
                 type: 'array',
                 description: 'fill_blank: sentence with ___ where the answer goes',
-                items: { type: 'object', properties: { num: { type: 'integer' }, sentence: { type: 'string' }, answer: { type: 'string' } }, required: ['num', 'sentence', 'answer'] },
+                items: { type: 'object', properties: { num: itemNum, sentence: { type: 'string' }, answer: { type: 'string' } }, required: ['sentence', 'answer'] },
               }),
               pairs: orNull({
                 type: 'array',
@@ -229,7 +236,21 @@ Call generate_layout_content with one entry per page above.`
 const s = (v) => cleanText(v).trim()
 const norm = (v) => s(v).toLowerCase().replace(/\s+/g, ' ')
 const has = (v) => v !== null && v !== undefined
-const arr = (v) => (Array.isArray(v) ? v.filter(has) : [])
+// Keys of a list written as an object: "1", "q2", "item_3" or a letter "A".
+const INDEX_KEY = /^\s*(?:[A-Za-z_ -]{0,12}?(\d+)|([A-Ja-j]))\s*$/
+const keyRank = (k) => { const m = k.match(INDEX_KEY); return m[1] !== undefined ? Number(m[1]) : m[2].toUpperCase().charCodeAt(0) - 64 }
+/**
+ * A list field as an array: arrays as-is; an object keyed by index/num/letter
+ * ({"1": {...}, "2": {...}}) as its values sorted by key; anything else []. Pure.
+ */
+export const toList = (v) => {
+  if (Array.isArray(v)) return v
+  if (!v || typeof v !== 'object') return []
+  const keys = Object.keys(v)
+  if (!keys.length || !keys.every(k => INDEX_KEY.test(k))) return []
+  return keys.sort((a, b) => keyRank(a) - keyRank(b)).map(k => v[k])
+}
+const arr = (v) => toList(v).filter(has)
 const dedupeBy = (list, key) => { const seen = new Set(); return list.filter(x => { const k = key(x); if (!k || seen.has(k)) return false; seen.add(k); return true }) }
 const BLANK_RE = /_{2,}/
 
