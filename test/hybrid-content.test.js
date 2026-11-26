@@ -341,3 +341,44 @@ describe('lenient list fields (Groq 400 tool_use_failed / validation failures)',
   })
 })
 
+
+describe('first-pass tuning (P3)', () => {
+  it('prompt: distinct matching terms, non-empty MC list, verifiable questions, short sort words', () => {
+    const p = buildHybridContentPrompt(plan, [page(2, 'x', 'y')])
+    expect(p).toContain('no near-synonyms or stages that blur into each other ("sprout" and "seedling")')
+    expect(p).toContain('the questions list is never empty')
+    expect(p).toContain('a teacher can mark it right or wrong from the answer key alone')
+    expect(p).toContain('Bad: "What is your favourite pizza topping?"')
+    expect(p).toMatch(/Each word is 1–4 words and ≤30 characters — a short example/)
+  })
+
+  it('a list written as a JSON string is parsed (gpt-oss stringified MC questions)', () => {
+    const qs = [{ question: 'Q1?', options: ['a', 'b'], answer: 'A' }]
+    expect(toList(JSON.stringify(qs))).toEqual(qs)
+    expect(toList('[not json')).toEqual([])
+    expect(toList('plain text')).toEqual([])
+    expect(normalizeHybridPage({ layout: 'multiple_choice', questions: JSON.stringify(qs) }).spec.questions).toHaveLength(1)
+  })
+
+  it('an empty multiple-choice list gets a targeted retry hint', () => {
+    const issues = validateHybridPage(normalizeHybridPage({ layout: 'multiple_choice', questions: [] }), { packageType: 'small' })
+    expect(issues).toContain('the questions list was empty — return 4–6 multiple-choice questions in "questions", each with its own options (2–4) and the answer letter')
+  })
+
+  const sortRaw = (words) => ({ layout: 'sorting', categories: ['Simile', 'Metaphor'], sortItems: words.map((w, i) => ({ word: w, category: i % 2 ? 'Metaphor' : 'Simile' })) })
+  const ok = ['as busy as a bee', 'time is money', 'as cold as ice', 'he is a night owl', 'like a rocket', 'life is a highway']
+
+  it('sorting: empty / over-long words are dropped (never truncated) when ≥6 remain', () => {
+    const long = 'The wind whispered softly through the tall old trees'
+    const n = normalizeHybridPage(sortRaw([...ok, long, '']))
+    expect(n.spec.items.map(i => i.word)).toEqual(ok)
+    expect(n.repairs).toContain('dropped 1 sort item(s) that were empty or longer than 30 chars') // the empty one is already gone (dedupe)
+    expect(validateHybridPage(n, { packageType: 'small' })).toEqual([])
+  })
+
+  it('sorting: too few would remain → kept, so the validator rejects with feedback', () => {
+    const n = normalizeHybridPage(sortRaw([...ok.slice(0, 5), 'The wind whispered softly through the tall old trees']))
+    expect(n.spec.items).toHaveLength(6)
+    expect(validateHybridPage(n, { packageType: 'small' }).some(i => /items\[5\]\.word empty or longer than 30/.test(i))).toBe(true)
+  })
+})

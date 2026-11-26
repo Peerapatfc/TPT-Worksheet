@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   matchingIssues, sortingIssues, normalizeHybridPage, validateHybridPage, buildHybridContentPrompt,
   matchingAmbiguity, buildMatchingCheckPrompt, selfCheckMatching, matchingSelfCheckEnabled, matchingSolveTool,
-  dropPairs, generateHybridPages, generateHybridContent, HYBRID_MAX_ATTEMPTS, numericValue,
+  dropPairs, pairsToDrop, MATCHING_DROP_MIN_PAIRS, generateHybridPages, generateHybridContent, HYBRID_MAX_ATTEMPTS, numericValue,
 } from '../src/steps/hybrid-content.js'
 import { matchingOrder, LETTERS } from '../src/lib/layout/specs.js'
 import { reviewNotes, resetReviewNotes } from '../src/lib/review-notes.js'
@@ -127,17 +127,33 @@ describe('generateHybridPages with the self-check (Groq mocked)', () => {
   beforeEach(() => { resetReviewNotes(); truthSolver.mockClear(); vi.spyOn(console, 'warn').mockImplementation(() => {}); vi.spyOn(console, 'log').mockImplementation(() => {}) })
   afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks() })
 
-  it('an ambiguous matching page is re-asked with the offending pair named, then passes', async () => {
+  it('an ambiguous pair is dropped on the first attempt when ≥4 pairs remain (no re-ask)', async () => {
+    const fetchChunk = vi.fn(async () => [ringsPageReworded])
+    const stats = { calls: [], pages: [] }
+    const { pages, failed } = await generateHybridPages(plan, [page], { fetchChunk, solveMatching: truthSolver, stats })
+    expect(fetchChunk).toHaveBeenCalledTimes(1)
+    expect(truthSolver).toHaveBeenCalledTimes(1)
+    expect(stats.pages.map(p => p.issues.length)).toEqual([0])
+    expect(failed).toEqual([])
+    const c = pages.get(6).content
+    expect(c.spec.pairs.map(p => p.term)).toEqual(['Mercury', 'Venus', 'Earth', 'Mars', 'Jupiter', 'Uranus', 'Neptune'])
+    expect(c.questions).toHaveLength(7)
+    expect(reviewNotes().some(n => /p6: matching self-check found overlapping meanings — dropped "Saturn"; 7 pairs remain/.test(n.message))).toBe(true)
+  })
+
+  const small = (src) => ({ ...src, pairs: src.pairs.slice(4, 8) }) // Jupiter, Saturn, Uranus, Neptune
+
+  it('fewer than 4 pairs would remain → re-asked with the offending pair named, then passes', async () => {
     const seen = []
-    const fetchChunk = vi.fn(async (_p, group, feedback) => { seen.push(new Map(feedback)); return [seen.length === 1 ? ringsPageReworded : fixedPage] })
+    const fetchChunk = vi.fn(async (_p, group, feedback) => { seen.push(new Map(feedback)); return [seen.length === 1 ? small(ringsPageReworded) : small(fixedPage)] })
     const stats = { calls: [], pages: [] }
     const { pages, failed } = await generateHybridPages(plan, [page], { fetchChunk, solveMatching: truthSolver, stats })
     expect(fetchChunk).toHaveBeenCalledTimes(2)
-    expect(truthSolver).toHaveBeenCalledTimes(2) // one extra call per validated matching page
+    expect(truthSolver).toHaveBeenCalledTimes(2)
     expect(seen[1].get(6)[0]).toMatch(/^ambiguous: the match "Has beautiful rings made of ice and rock" \(for "Saturn"\) is also true for "Jupiter"/)
     expect(stats.pages.map(p => p.issues.length > 0)).toEqual([true, false])
     expect(failed).toEqual([])
-    expect(pages.get(6).content.spec.pairs[5].match).toBe('Planet with the largest, brightest ring system')
+    expect(pages.get(6).content.spec.pairs[1].match).toBe('Planet with the largest, brightest ring system')
   })
 
   it('code-rejected pages never reach the self-check', async () => {
@@ -148,14 +164,43 @@ describe('generateHybridPages with the self-check (Groq mocked)', () => {
   })
 
   it('still ambiguous after every attempt → the offending pairs are dropped (≥3 remain) with a review note', async () => {
-    const fetchChunk = vi.fn(async () => [ringsPageReworded])
+    const fetchChunk = vi.fn(async () => [small(ringsPageReworded)])
     const { pages, failed } = await generateHybridPages(plan, [page], { fetchChunk, solveMatching: truthSolver })
     expect(fetchChunk).toHaveBeenCalledTimes(HYBRID_MAX_ATTEMPTS)
     expect(failed).toEqual([])
     const c = pages.get(6).content
-    expect(c.spec.pairs.map(p => p.term)).toEqual(['Mercury', 'Venus', 'Earth', 'Mars', 'Jupiter', 'Uranus', 'Neptune'])
-    expect(c.questions).toHaveLength(7)
-    expect(reviewNotes().some(n => n.kind === 'fallback' && /p6: matching stayed ambiguous .* dropped "Saturn"; 7 pairs remain/.test(n.message))).toBe(true)
+    expect(c.spec.pairs.map(p => p.term)).toEqual(['Jupiter', 'Uranus', 'Neptune'])
+    expect(reviewNotes().some(n => n.kind === 'fallback' && /p6: matching stayed ambiguous .* dropped "Saturn"; 3 pairs remain/.test(n.message))).toBe(true)
+  })
+
+  it('pairsToDrop drops the fewest pairs: one of two near-synonyms, not both', () => {
+    // seed(0)→pollen(3); sprout(1)↔seedling(2)
+    expect(pairsToDrop([[0, 3], [1, 2], [2, 1]])).toHaveLength(2)
+    expect(pairsToDrop([[1, 2], [2, 1]])).toEqual([2])
+    expect(pairsToDrop([[5, 4], [5, 6], [5, 7]])).toEqual([5])
+    expect(pairsToDrop([[0, 3]])).toEqual([0]) // the pair whose statement is ambiguous
+    expect(pairsToDrop([])).toEqual([])
+    expect(MATCHING_DROP_MIN_PAIRS).toBe(4)
+  })
+
+  it('Spring sprout/seedling page: only the overlapping pairs go, the page passes first try', async () => {
+    const spring = { pageNum: 6, title: 'Plant Words', layout: 'matching', illustrationSubject: 'a green seedling in soil', questions: null, chart: null, pairs: [
+      { term: 'seed', match: 'A tiny package that can start a new plant' },
+      { term: 'sprout', match: 'The first tiny shoot that pushes up from a seed' },
+      { term: 'seedling', match: 'A young plant with a few leaves' },
+      { term: 'pollen', match: 'Yellow dust that bees carry between flowers' },
+      { term: 'root', match: 'Part that holds the plant in the soil' },
+      { term: 'flower', match: 'Colourful part where seeds are made' },
+    ] }
+    const idx = (t) => spring.pairs.findIndex(p => p.term === t) + 1
+    const solve = async (_p, sp) => answer(sp, { 0: [1, idx('pollen')], 1: [2, idx('seedling')], 2: [3, idx('sprout')] })
+    const stats = { calls: [], pages: [] }
+    const { pages } = await generateHybridPages(plan, [page], { fetchChunk: async () => [spring], solveMatching: solve, stats })
+    expect(stats.pages[0].issues).toEqual([])
+    const terms = pages.get(6).content.spec.pairs.map(p => p.term)
+    expect(terms).toHaveLength(4)
+    expect(terms).toEqual(expect.arrayContaining(['root', 'flower']))
+    expect(terms.includes('sprout') && terms.includes('seedling')).toBe(false)
   })
 
   it('too few pairs left after dropping → falls back like any failure (legacy list)', async () => {

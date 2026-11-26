@@ -202,10 +202,10 @@ Set: "${plan.setTitle}" | Grade: ${plan.gradeLevel} | Subject: ${plan.subject}
 
 Every page is typeset by code from the structured data you return. Pick ONE layout per page and fill ONLY that layout's fields (leave the others out):
 - questions: questions [{num, question, answer}], ${qMin}–${qMax} items. Short-answer knowledge questions or word problems.
-- multiple_choice: questions [{num, question, options (2–4), answer}], ${qMin}–${qMax} items. answer = the letter (A–D) of the one correct option; options distinct.
+- multiple_choice: questions [{num, question, options (2–4), answer}], ${qMin}–${qMax} items — the questions list is never empty, and each item carries its own options. answer = the letter (A–D) of the one correct option; options distinct.
 - fill_blank: wordBank (the answers, ≤3 words each) + sentences [{num, sentence, answer}], ${qMin}–${qMax} items. Each sentence contains "___" where its answer goes and never contains the answer itself; every answer is in wordBank.
 - matching: pairs [{term, match}], 4–8 pairs. term ≤${LIMITS.term} chars, match ≤12 words (a definition, unique fact or word). Code shuffles the right column.
-- sorting: categories (2–3 headings) + sortItems [{word, category}], 6–12 items, each word ≤${LIMITS.word} chars, each category used at least twice.
+- sorting: categories (2–3 headings) + sortItems [{word, category}], 6–12 items, each category used at least twice. Each word is 1–4 words and ≤${LIMITS.word} characters — a short example ("as busy as a bee", "buzz"), never a whole sentence.
 - labeling: subject (one concrete thing drawn large, e.g. "a sunflower plant") + labels [{word, clue}], 4–6 labels. The student writes the word from the word bank next to each numbered clue. A clue describes the part's job or look in words and never contains its word.
 - table_fill: columns (2–4 headers) + rows (3–6 rows, each the same length as columns). A blank cell is written as its answer in square brackets, e.g. ["Cat", "4", "[8]"]. Every blank must follow from the rest of its row (a rule named in the header such as "Total" or "Double") or from a well-known fact. Optional: up to 3 questions that need the table (compare, total, difference) — never one whose answer is just a blank or a printed cell.
 - shapes: shapeItems, 4–8 items drawn by code: {kind:"fraction", shape: circle|rectangle|bar, parts 2–12, shaded, ask: "name" (write the fraction) | "shade" (student shades it)}, {kind:"count", icon: ${CHART_ICONS.join('|')}, count 1–20}, {kind:"polygon", shape, ask: "sides" | "corners" | "name"}. Use ask "name" only for triangle, pentagon, hexagon, octagon or circle — a square is also a rectangle and a rhombus.
@@ -219,9 +219,12 @@ THE PICTURE IS DECORATION ONLY. Each page gets one illustration from an AI that 
 - illustrationSubject: a concrete thing from the page topic (≤8 words) to draw, e.g. "a smiling orange pumpkin with a green stem" — never a table, chart, sign, word, number or letter.
 
 Content rules:
-- Every question, clue, blank and table cell has exactly ONE correct, checkable answer that is factually and academically correct. No opinion or guessing questions ("What do you think…", "Who is likely…"), no negative questions with several valid answers, no questions about the student's own drawing, collection, story or experience.
+- Every question, clue, blank and table cell has exactly ONE correct, checkable answer that is factually and academically correct — a teacher can mark it right or wrong from the answer key alone. No opinion or guessing questions ("What do you think…", "Who is likely…"), no negative questions with several valid answers, no questions about the student's own drawing, collection, choice, favourite, story or experience: never "your …", "did you", "you chose/found/drew", and never start with "Draw", "Describe" or "Write a sentence".
+  Bad: "What is your favourite pizza topping?", "Describe how you would share a pizza.", "Draw a pizza cut into fourths." Good: "A pizza is cut into 8 equal slices and 3 are eaten. What fraction is eaten?" (3/8); "Which is bigger, 1/2 or 1/4 of the same pizza?" (1/2).
 - Matching: each match must be TRUE for its own term and FALSE for every other term on the page, so a student who knows the topic finds exactly one fit. Use a definition, a fact unique within the list, or a superlative ("closest", "largest", "only") — never a property several of the terms share ("has rings", "is a mammal", "lives in water", "is big", "is important"). In a set whose members are alike (planets, animals, shapes) pick the one fact that singles each out. Terms all different; a match never contains its own term.
   Bad (planets): Saturn – "Has a system of rings" (Jupiter, Uranus and Neptune have rings too). Good: Mercury – "Closest planet to the Sun"; Jupiter – "Largest planet".
+- Matching terms are clearly different concepts: no near-synonyms or stages that blur into each other ("sprout" and "seedling"), no parent/part pairs ("plant" and "leaf"), no two things that do the same job ("seed" and "pollen" both "start a new plant"). A match never reuses the key words of another pair's meaning.
+  Bad (plants): sprout – "first shoot from a seed", seedling – "young plant with a few leaves" (each fits both). Good: root – "Holds the plant in the soil"; pollen – "Yellow dust bees carry from flower to flower".
 - Sorting: every word clearly belongs to exactly one category and appears only once.
 - Use only words a ${plan.gradeLevel} student can read; avoid technical terms unless the page defines them.
 - Answers are short: a word, number or short phrase.
@@ -241,10 +244,13 @@ const INDEX_KEY = /^\s*(?:[A-Za-z_ -]{0,12}?(\d+)|([A-Ja-j]))\s*$/
 const keyRank = (k) => { const m = k.match(INDEX_KEY); return m[1] !== undefined ? Number(m[1]) : m[2].toUpperCase().charCodeAt(0) - 64 }
 /**
  * A list field as an array: arrays as-is; an object keyed by index/num/letter
- * ({"1": {...}, "2": {...}}) as its values sorted by key; anything else []. Pure.
+ * ({"1": {...}, "2": {...}}) as its values sorted by key; a JSON string of either
+ * parsed first; anything else []. Pure.
  */
 export const toList = (v) => {
   if (Array.isArray(v)) return v
+  // gpt-oss sometimes writes a list as a JSON string ("[{\"question\": …}]").
+  if (typeof v === 'string' && /^\s*[[{]/.test(v)) { try { return toList(JSON.parse(v)) } catch { return [] } }
   if (!v || typeof v !== 'object') return []
   const keys = Object.keys(v)
   if (!keys.length || !keys.every(k => INDEX_KEY.test(k))) return []
@@ -253,6 +259,8 @@ export const toList = (v) => {
 const arr = (v) => toList(v).filter(has)
 const dedupeBy = (list, key) => { const seen = new Set(); return list.filter(x => { const k = key(x); if (!k || seen.has(k)) return false; seen.add(k); return true }) }
 const BLANK_RE = /_{2,}/
+// Sort items left after dropping over-long ones (the prompt asks for 6–12).
+export const SORT_KEEP_MIN = 6
 
 // Text a student reads that would depend on the decorative picture.
 const PICTURE_DEPENDENT = [
@@ -486,12 +494,19 @@ export function normalizeHybridPage(raw) {
     }
     case 'sorting': {
       const categories = dedupeBy(arr(raw.categories).map(s).filter(Boolean), norm)
-      const items = dedupeBy(arr(raw.sortItems ?? raw.items).map(it => {
+      let items = dedupeBy(arr(raw.sortItems ?? raw.items).map(it => {
         const cat = categories.find(c => norm(c) === norm(it.category))
         return { word: s(it.word), category: cat ?? s(it.category) }
       // Keyed by word + category: a word filed under two categories survives so the
       // validator can reject it (ambiguous) instead of silently keeping the first.
       }), it => (norm(it.word) ? `${norm(it.word)}|${norm(it.category)}` : ''))
+      // A word that is empty or over LIMITS.word (a whole sentence) is dropped — never
+      // truncated, which would change its meaning — when SORT_KEEP_MIN items remain.
+      const fits = items.filter(it => it.word && it.word.length <= LIMITS.word)
+      if (fits.length < items.length && fits.length >= SORT_KEEP_MIN) {
+        repairs.push(`dropped ${items.length - fits.length} sort item(s) that were empty or longer than ${LIMITS.word} chars`)
+        items = fits
+      }
       if (items.length > LIMITS.items.max) repairs.push(`sorting trimmed to ${LIMITS.items.max} items`)
       spec = { categories, items: items.slice(0, LIMITS.items.max) }
       break
@@ -549,7 +564,7 @@ export function validateHybridPage(norm_, { packageType = 'small', plan = null, 
   const { layout, spec, questions } = norm_
   if (!layout) return ['layout missing or not one of the allowed layouts']
   const issues = []
-  const [qMin] = questionRange(packageType)
+  const [qMin, qMax] = questionRange(packageType)
   const minQ = Math.max(3, qMin - 1)
   if (layout === 'questions' || layout === 'fill_blank' || layout === 'chart') {
     if (!questions?.length) issues.push('no questions')
@@ -570,7 +585,8 @@ export function validateHybridPage(norm_, { packageType = 'small', plan = null, 
     issues.push(...validateLayoutSpec(layout, spec))
     if (layout === 'matching') issues.push(...matchingIssues(spec.pairs))
     if (layout === 'sorting') issues.push(...sortingIssues(spec))
-    if (layout === 'multiple_choice' && spec.questions?.length < minQ) issues.push(`only ${spec.questions.length} questions (min ${minQ})`)
+    if (layout === 'multiple_choice' && !spec.questions?.length) issues.push(`the questions list was empty — return ${qMin}–${qMax} multiple-choice questions in "questions", each with its own options (2–4) and the answer letter`)
+    else if (layout === 'multiple_choice' && spec.questions.length < minQ) issues.push(`only ${spec.questions.length} questions (min ${minQ})`)
   }
   const asked = layout === 'multiple_choice' ? spec.questions : layout === 'table_fill' ? spec.questions : questions
   for (const q of asked ?? []) if (isOpenEndedQuestion(q.question)) issues.push(`q${q.num} is open-ended (no single answer)`)
@@ -716,6 +732,7 @@ export function matchingAmbiguity(spec, args) {
   if (seen.size < n) return { valid: false }
   const issues = []
   const offending = []
+  const conflicts = [] // [j, t]: statement j is also true of term t
   const q = (v) => `"${s(v)}"`
   // A purely numeric statement is true only of a term with the same value: a claim
   // that "one third" also fits "1/2" is the checker's mistake, not an ambiguity.
@@ -729,12 +746,13 @@ export function matchingAmbiguity(spec, args) {
     const others = [...new Set([best, ...also])].filter(t => t >= 0 && t !== j && !differentNumber(j, t))
     if (!others.length) continue
     offending.push(j)
+    for (const t of others) conflicts.push([j, t])
     const { term, match } = spec.pairs[j]
     issues.push(best >= 0 && best !== j && !differentNumber(j, best)
       ? `ambiguous: a checker matched ${q(match)} to ${q(spec.pairs[best].term)}, not ${q(term)} — use a fact true only for ${q(term)}`
       : `ambiguous: the match ${q(match)} (for ${q(term)}) is also true for ${others.map(t => q(spec.pairs[t].term)).join(', ')} — use a fact true only for ${q(term)}`)
   }
-  return { valid: true, ambiguous: issues.length > 0, issues, offending }
+  return { valid: true, ambiguous: issues.length > 0, issues, offending, conflicts }
 }
 
 /** One Groq self-check call. Returns the tool args (or null). Throws on API errors. */
@@ -771,10 +789,34 @@ export async function selfCheckMatching(plan, spec, { solve = solveMatchingGroq,
   }
 }
 
-/** A matching spec without the offending pairs, if ≥ LIMITS.pairs.min remain; else null. Pure. */
-export function dropPairs(spec, offending) {
+/** A matching spec without the offending pairs, if ≥ `min` remain; else null. Pure. */
+export function dropPairs(spec, offending, min = LIMITS.pairs.min) {
   const pairs = spec.pairs.filter((_, i) => !offending.includes(i))
-  return pairs.length >= LIMITS.pairs.min ? { ...spec, pairs } : null
+  return pairs.length >= min ? { ...spec, pairs } : null
+}
+
+// A self-check ambiguity between two near-synonyms ("sprout" / "seedling") is fixed on
+// the spot by dropping as few pairs as possible, when at least this many remain; fewer
+// → the page is re-asked. Code-found ambiguity (has rings, same match) is never dropped.
+export const MATCHING_DROP_MIN_PAIRS = 4
+
+/**
+ * The fewest pair indices to drop so no conflict [j, t] (statement j also true of term
+ * t) is left: greedily the pair in most remaining conflicts; ties → the pair whose own statement
+ * is ambiguous, then the later pair. Pure.
+ */
+export function pairsToDrop(conflicts = []) {
+  let left = conflicts.filter(([j, t]) => j !== t)
+  const drop = []
+  while (left.length) {
+    const deg = new Map() // pair → [conflicts it is in, conflicts it owns the statement of]
+    const bump = (i, own) => { const d = deg.get(i) ?? [0, 0]; d[0]++; d[1] += own; deg.set(i, d) }
+    for (const [j, t] of left) { bump(j, 1); bump(t, 0) }
+    const pick = [...deg].sort((a, b) => b[1][0] - a[1][0] || b[1][1] - a[1][1] || b[0] - a[0])[0][0]
+    drop.push(pick)
+    left = left.filter(([j, t]) => j !== pick && t !== pick)
+  }
+  return drop.sort((a, b) => a - b)
 }
 
 // ── Groq calls ───────────────────────────────────────────────────────────────
@@ -848,8 +890,16 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
         console.warn(`matching self-check p${c.page.pageNum} failed (${r.error}) — page kept unchecked`)
         addReviewNote('fallback', `p${c.page.pageNum}: matching self-check failed (${r.error}) — check that every meaning fits only one term`)
       } else if (r.ambiguous) {
-        c.issues = r.issues
-        ambiguous.set(c.page.pageNum, { ...c, offending: r.offending })
+        const drop = pairsToDrop(r.conflicts)
+        const kept = dropPairs(c.n.spec, drop, MATCHING_DROP_MIN_PAIRS)
+        const n = kept && { ...c.n, spec: kept, repairs: [...c.n.repairs, `dropped ${drop.length} ambiguous matching pair(s)`] }
+        if (n && validateHybridPage(n, opts({ ...c.page, title: s(c.raw.title) })).length === 0) {
+          addReviewNote('fallback', `p${c.page.pageNum}: matching self-check found overlapping meanings — dropped ${drop.map(i => `"${c.n.spec.pairs[i].term}"`).join(', ')}; ${kept.pairs.length} pairs remain`)
+          c.n = n
+        } else {
+          c.issues = r.issues
+          ambiguous.set(c.page.pageNum, { ...c, offending: pairsToDrop(r.conflicts) })
+        }
       }
     })
     for (const { page, raw, n, issues } of checked) {
