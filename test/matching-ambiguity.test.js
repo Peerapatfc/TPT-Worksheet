@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   matchingIssues, sortingIssues, normalizeHybridPage, validateHybridPage, buildHybridContentPrompt,
   matchingAmbiguity, buildMatchingCheckPrompt, selfCheckMatching, matchingSelfCheckEnabled, matchingSolveTool,
-  dropPairs, pairsToDrop, MATCHING_DROP_MIN_PAIRS, generateHybridPages, generateHybridContent, HYBRID_MAX_ATTEMPTS, numericValue,
+  dropPairs, pairsToDrop, MATCHING_DROP_MIN_PAIRS, buildMatchingReplacePrompt, matchingReplaceTool, generateHybridPages, generateHybridContent, HYBRID_MAX_ATTEMPTS, numericValue,
 } from '../src/steps/hybrid-content.js'
 import { matchingOrder, LETTERS } from '../src/lib/layout/specs.js'
 import { reviewNotes, resetReviewNotes } from '../src/lib/review-notes.js'
@@ -303,3 +303,61 @@ describe('numbers and fractions (self-check false positives)', () => {
   })
 })
 
+
+describe('replacement pairs when too few would remain (Groq mocked)', () => {
+  beforeEach(() => { resetReviewNotes(); truthSolver.mockClear(); vi.spyOn(console, 'warn').mockImplementation(() => {}) })
+  afterEach(() => { vi.restoreAllMocks() })
+  const small = (src) => ({ ...src, pairs: src.pairs.slice(4, 8) }) // Jupiter, Saturn, Uranus, Neptune
+
+  it('prompt lists kept pairs and forbids kept + dropped terms and their near-synonyms', () => {
+    const p = buildMatchingReplacePrompt(plan, page, { kept: [{ term: 'root', match: 'Holds the plant in the soil' }], dropped: [{ term: 'sprout', match: 'x' }], need: 2 })
+    expect(p).toContain('- root – Holds the plant in the soil')
+    expect(p).toContain('Do NOT use these terms, or any near-synonym, stage, part or whole of them, or anything that does the same job: "root", "sprout"')
+    expect(p).toContain('exactly 2 pair(s)')
+    expect(matchingReplaceTool.function.parameters.required).toEqual(['pairs'])
+  })
+
+  it('replaces only the dropped pair and passes on the first attempt', async () => {
+    const fetchChunk = vi.fn(async () => [small(ringsPageReworded)])
+    const fetchReplacements = vi.fn(async (_p, _pg, { kept, dropped, need }) => {
+      expect(kept.map(p => p.term)).toEqual(['Jupiter', 'Uranus', 'Neptune'])
+      expect(dropped.map(p => p.term)).toEqual(['Saturn'])
+      expect(need).toBe(1)
+      return [{ term: 'Jupiter', match: 'dup term is ignored' }, { term: 'Mercury', match: 'Planet closest to the Sun' }]
+    })
+    const stats = { calls: [], pages: [] }
+    const { pages, failed } = await generateHybridPages(plan, [page], { fetchChunk, solveMatching: truthSolver, fetchReplacements, stats })
+    expect(fetchChunk).toHaveBeenCalledTimes(1)
+    expect(fetchReplacements).toHaveBeenCalledTimes(1)
+    expect(truthSolver).toHaveBeenCalledTimes(2) // page + merged page
+    expect(failed).toEqual([])
+    expect(stats.pages[0].issues).toEqual([])
+    expect(pages.get(6).content.spec.pairs.map(p => p.term)).toEqual(['Jupiter', 'Uranus', 'Neptune', 'Mercury'])
+    expect(reviewNotes().some(n => /replaced "Saturn" with "Mercury"/.test(n.message))).toBe(true)
+  })
+
+  it('a replacement that is still ambiguous, too short, or a failed call → next attempt', async () => {
+    for (const fetchReplacements of [
+      async () => [{ term: 'Ringworld', match: 'Has beautiful rings made of ice and rock' }], // self-check flags it again
+      async () => [],
+      async () => { throw Object.assign(new Error('rate'), { status: 429 }) },
+    ]) {
+      const fetchChunk = vi.fn(async (_p, _g, feedback) => [feedback.size ? small(fixedPage) : small(ringsPageReworded)])
+      const { pages } = await generateHybridPages(plan, [page], { fetchChunk, solveMatching: truthSolver, fetchReplacements })
+      expect(fetchChunk).toHaveBeenCalledTimes(2)
+      expect(pages.get(6).content.spec.pairs[1].match).toBe('Planet with the largest, brightest ring system')
+    }
+  })
+
+  it('code-found shared property ("has rings") is still rejected without asking for replacements', async () => {
+    const fetchReplacements = vi.fn()
+    await generateHybridPages(plan, [page], { fetchChunk: async () => [ringsPage], solveMatching: truthSolver, fetchReplacements })
+    expect(fetchReplacements).not.toHaveBeenCalled()
+  })
+
+  it('mocked fetchChunk without fetchReplacements never reaches the network (re-asks instead)', async () => {
+    const fetchChunk = vi.fn(async (_p, _g, feedback) => [feedback.size ? small(fixedPage) : small(ringsPageReworded)])
+    await generateHybridPages(plan, [page], { fetchChunk, solveMatching: truthSolver })
+    expect(fetchChunk).toHaveBeenCalledTimes(2)
+  })
+})

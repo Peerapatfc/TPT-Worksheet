@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   suggestLayout, buildHybridContentPrompt, hybridContentTool, normalizeHybridPage, validateHybridPage, toList,
   isPictureDependent, readsOtherPageContent, hybridPageContent, questionsFallback, generateHybridPages,
-  generateHybridContent, recheckItems, applyHybridCorrections, HYBRID_PAGES_PER_CALL,
+  generateHybridContent, recheckItems, applyHybridCorrections, HYBRID_PAGES_PER_CALL, matchRawPages,
 } from '../src/steps/hybrid-content.js'
 import { layoutAnswerKey, shapeItemQA } from '../src/lib/layout/specs.js'
 import { structuredRoute, generateWorksheetPage, routePage } from '../src/steps/generate-pages.js'
@@ -56,7 +56,7 @@ describe('layout hint + prompt + schema (hybrid only)', () => {
     expect(p).not.toMatch(/imageSpec/)
     const props = hybridContentTool.function.parameters.properties.pages.items.properties
     expect(props.imageSpec).toBeUndefined()
-    expect(hybridContentTool.function.parameters.properties.pages.items.required).toEqual(['pageNum', 'title', 'layout'])
+    expect(hybridContentTool.function.parameters.properties.pages.items.required).toEqual(['title', 'layout']) // pageNum optional (matchRawPages)
     for (const k of ['questions', 'pairs', 'chart', 'shapeItems', 'illustrationSubject']) {
       expect(props[k].anyOf.map(a => a.type)).toEqual(expect.arrayContaining(['null', 'string']))
     }
@@ -349,7 +349,7 @@ describe('first-pass tuning (P3)', () => {
     expect(p).toContain('the questions list is never empty')
     expect(p).toContain('a teacher can mark it right or wrong from the answer key alone')
     expect(p).toContain('Bad: "What is your favourite pizza topping?"')
-    expect(p).toMatch(/Each word is 1–4 words and ≤30 characters — a short example/)
+    expect(p).toMatch(/Each word is 1–3 words \(a short simile or idiom such as "as busy as a bee" may be up to 30 characters\), never a whole sentence, and its category is spelled exactly/)
   })
 
   it('a list written as a JSON string is parsed (gpt-oss stringified MC questions)', () => {
@@ -372,7 +372,7 @@ describe('first-pass tuning (P3)', () => {
     const long = 'The wind whispered softly through the tall old trees'
     const n = normalizeHybridPage(sortRaw([...ok, long, '']))
     expect(n.spec.items.map(i => i.word)).toEqual(ok)
-    expect(n.repairs).toContain('dropped 1 sort item(s) that were empty or longer than 30 chars') // the empty one is already gone (dedupe)
+    expect(n.repairs).toContain('dropped 1 sort item(s) that were empty, longer than 30 chars or not under a listed category') // the empty one is already gone (dedupe)
     expect(validateHybridPage(n, { packageType: 'small' })).toEqual([])
   })
 
@@ -380,5 +380,49 @@ describe('first-pass tuning (P3)', () => {
     const n = normalizeHybridPage(sortRaw([...ok.slice(0, 5), 'The wind whispered softly through the tall old trees']))
     expect(n.spec.items).toHaveLength(6)
     expect(validateHybridPage(n, { packageType: 'small' }).some(i => /items\[5\]\.word empty or longer than 30/.test(i))).toBe(true)
+  })
+})
+
+describe('offline tuning (P3, round 2)', () => {
+  const g = [page(4, 'a', ''), page(5, 'b', ''), page(6, 'c', '')]
+  it('matchRawPages: by pageNum (number or string), else by position when pageNum is absent', () => {
+    const m = matchRawPages(g, [{ pageNum: '6', title: 'C' }, { title: 'B?' }, { pageNum: 4, title: 'A' }])
+    expect(m.map(r => r?.title)).toEqual(['A', 'B?', 'C'])
+    expect(m.map(r => r?.pageNum)).toEqual([4, 5, 6])
+    expect(matchRawPages(g, [{ title: 'x' }])[0].pageNum).toBe(4)
+    expect(matchRawPages(g, [{ title: 'x' }])[1]).toBeNull()
+    expect(matchRawPages(g, [{ pageNum: 9, title: 'other' }])).toEqual([null, null, null])
+    expect(matchRawPages(g, null)).toEqual([null, null, null])
+  })
+
+  it('a page without pageNum is no longer lost (CVC p5 400 case)', async () => {
+    const r = { title: 'Colour', layout: 'activity_art', subject: 'a cat', instruction: 'Colour the cat.' }
+    const { pages, failed } = await generateHybridPages(plan, [page(5, 'colour-cat', 'Colouring page: a cat', 'activity')], { fetchChunk: async () => [r] })
+    expect(failed).toEqual([])
+    expect(pages.get(5).content.layout).toBe('activity_art')
+  })
+
+  it('"the table" as furniture is fine; data-table wording is flagged', () => {
+    expect(readsOtherPageContent('There are 4 apples on the table. Mom puts 8 more apples on the table. How many apples are there?')).toBe(false)
+    expect(readsOtherPageContent('Sam sets the table with 3 plates. How many more for 5 people?')).toBe(false)
+    expect(readsOtherPageContent('In the table, which animal has the most legs?')).toBe(true)
+    expect(readsOtherPageContent('The table shows how many apples each child picked. Who picked most?')).toBe(true)
+    expect(readsOtherPageContent('Use the table to find the total.')).toBe(true)
+    expect(readsOtherPageContent('Look at the chart. Which is tallest?')).toBe(true)
+  })
+
+  const fig = (items) => ({ layout: 'sorting', categories: ['Simile', 'Metaphor'], sortItems: items })
+  const good = [['as busy as a bee', 'Simile'], ['time is money', 'Metaphor'], ['as cold as ice', 'Simile'], ['a night owl', 'Metaphor'], ['like a rocket', 'Simile'], ['a heart of gold', 'Metaphor']].map(([word, category]) => ({ word, category }))
+
+  it('sorting: an item under an unlisted category is dropped when ≥6 valid remain', () => {
+    const n = normalizeHybridPage(fig([...good, { word: 'the wind sighed', category: 'Personification' }, { word: 'buzz', category: 'Onomatopoeia' }]))
+    expect(n.spec.items.map(i => i.word)).toEqual(good.map(i => i.word))
+    expect(validateHybridPage(n, { packageType: 'small' })).toEqual([])
+  })
+
+  it('sorting: too few valid items → re-asked with the exact categories and the word limit', () => {
+    const n = normalizeHybridPage(fig([...good.slice(0, 4), { word: 'The wind sighed sadly through the old trees', category: 'Simile' }, { word: 'buzz', category: 'Onomatopoeia' }]))
+    const issues = validateHybridPage(n, { packageType: 'small' })
+    expect(issues).toContain('sort items: use only the categories "Simile", "Metaphor" (spelled exactly) and keep each word to 1–3 words (a short simile or idiom may be up to 30 characters), never a sentence')
   })
 })

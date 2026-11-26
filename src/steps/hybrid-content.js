@@ -73,7 +73,9 @@ export const hybridContentTool = {
           items: {
             type: 'object',
             properties: {
-              pageNum: { type: 'integer' },
+              // Optional: a page without pageNum failed the whole call (400 tool_use_failed);
+              // matchRawPages pairs it with its planned page by position.
+              pageNum: itemNum,
               title: { type: 'string' },
               layout: { type: 'string', enum: HYBRID_LAYOUTS },
               illustrationSubject: orNull({ type: 'string', description: 'decorative picture: concrete noun phrase, max 8 words, no text' }),
@@ -155,7 +157,7 @@ export const hybridContentTool = {
                 // validateChart checks chart pages.
               }),
             },
-            required: ['pageNum', 'title', 'layout'],
+            required: ['title', 'layout'],
           },
         },
       },
@@ -205,7 +207,7 @@ Every page is typeset by code from the structured data you return. Pick ONE layo
 - multiple_choice: questions [{num, question, options (2–4), answer}], ${qMin}–${qMax} items — the questions list is never empty, and each item carries its own options. answer = the letter (A–D) of the one correct option; options distinct.
 - fill_blank: wordBank (the answers, ≤3 words each) + sentences [{num, sentence, answer}], ${qMin}–${qMax} items. Each sentence contains "___" where its answer goes and never contains the answer itself; every answer is in wordBank.
 - matching: pairs [{term, match}], 4–8 pairs. term ≤${LIMITS.term} chars, match ≤12 words (a definition, unique fact or word). Code shuffles the right column.
-- sorting: categories (2–3 headings) + sortItems [{word, category}], 6–12 items, each category used at least twice. Each word is 1–4 words and ≤${LIMITS.word} characters — a short example ("as busy as a bee", "buzz"), never a whole sentence.
+- sorting: categories (2–3 headings) + sortItems [{word, category}], 6–12 items, each category used at least twice. Each word is 1–3 words (a short simile or idiom such as "as busy as a bee" may be up to ${LIMITS.word} characters), never a whole sentence, and its category is spelled exactly as one of the headings.
 - labeling: subject (one concrete thing drawn large, e.g. "a sunflower plant") + labels [{word, clue}], 4–6 labels. The student writes the word from the word bank next to each numbered clue. A clue describes the part's job or look in words and never contains its word.
 - table_fill: columns (2–4 headers) + rows (3–6 rows, each the same length as columns). A blank cell is written as its answer in square brackets, e.g. ["Cat", "4", "[8]"]. Every blank must follow from the rest of its row (a rule named in the header such as "Total" or "Double") or from a well-known fact. Optional: up to 3 questions that need the table (compare, total, difference) — never one whose answer is just a blank or a printed cell.
 - shapes: shapeItems, 4–8 items drawn by code: {kind:"fraction", shape: circle|rectangle|bar, parts 2–12, shaded, ask: "name" (write the fraction) | "shade" (student shades it)}, {kind:"count", icon: ${CHART_ICONS.join('|')}, count 1–20}, {kind:"polygon", shape, ask: "sides" | "corners" | "name"}. Use ask "name" only for triangle, pentagon, hexagon, octagon or circle — a square is also a rectangle and a rhombus.
@@ -261,6 +263,7 @@ const dedupeBy = (list, key) => { const seen = new Set(); return list.filter(x =
 const BLANK_RE = /_{2,}/
 // Sort items left after dropping over-long ones (the prompt asks for 6–12).
 export const SORT_KEEP_MIN = 6
+const sortItemFits = (categories) => (it) => !!it.word && it.word.length <= LIMITS.word && categories.includes(it.category)
 
 // Text a student reads that would depend on the decorative picture.
 const PICTURE_DEPENDENT = [
@@ -277,7 +280,9 @@ const PICTURE_DEPENDENT = [
 // story, passage, list, row or numbered item that is not on the page.
 const READS_MISSING = [
   /\baccording to the\b/i,
-  /\b(?:the|this|that) (?:story|passage|poem|text|list|data|graph|chart|table|map|diagram|page)\b/i,
+  /\b(?:the|this|that) (?:story|passage|poem|text|list|data|graph|chart|map|diagram|page)\b/i,
+  // "the table" alone is often furniture ("4 apples on the table"); only data-table wording counts.
+  /\b(?:in|from|using|use|read|look at|according to) (?:the|this|that) table\b|\b(?:the|this|that) table (?:shows?|above|below|lists?)\b/i,
   /\b(?:sentence|section|row|item|card|example|box|step|column) (?:\d+|[A-H])\b/,
   /\b(?:first|second|third|fourth|fifth|last) (?:picture|image|word|row|column|box)\b/i,
 ]
@@ -500,11 +505,12 @@ export function normalizeHybridPage(raw) {
       // Keyed by word + category: a word filed under two categories survives so the
       // validator can reject it (ambiguous) instead of silently keeping the first.
       }), it => (norm(it.word) ? `${norm(it.word)}|${norm(it.category)}` : ''))
-      // A word that is empty or over LIMITS.word (a whole sentence) is dropped — never
-      // truncated, which would change its meaning — when SORT_KEEP_MIN items remain.
-      const fits = items.filter(it => it.word && it.word.length <= LIMITS.word)
+      // An item that is empty, over LIMITS.word (a whole sentence) or filed under a
+      // category not in the list is dropped — never truncated or re-filed, which would
+      // change its meaning — when SORT_KEEP_MIN items remain; else the page is re-asked.
+      const fits = items.filter(sortItemFits(categories))
       if (fits.length < items.length && fits.length >= SORT_KEEP_MIN) {
-        repairs.push(`dropped ${items.length - fits.length} sort item(s) that were empty or longer than ${LIMITS.word} chars`)
+        repairs.push(`dropped ${items.length - fits.length} sort item(s) that were empty, longer than ${LIMITS.word} chars or not under a listed category`)
         items = fits
       }
       if (items.length > LIMITS.items.max) repairs.push(`sorting trimmed to ${LIMITS.items.max} items`)
@@ -584,7 +590,12 @@ export function validateHybridPage(norm_, { packageType = 'small', plan = null, 
   } else {
     issues.push(...validateLayoutSpec(layout, spec))
     if (layout === 'matching') issues.push(...matchingIssues(spec.pairs))
-    if (layout === 'sorting') issues.push(...sortingIssues(spec))
+    if (layout === 'sorting') {
+      issues.push(...sortingIssues(spec))
+      if ((spec.items ?? []).some(it => !sortItemFits(spec.categories ?? [])(it))) {
+        issues.push(`sort items: use only the categories ${(spec.categories ?? []).map(c => `"${c}"`).join(', ')} (spelled exactly) and keep each word to 1–3 words (a short simile or idiom may be up to ${LIMITS.word} characters), never a sentence`)
+      }
+    }
     if (layout === 'multiple_choice' && !spec.questions?.length) issues.push(`the questions list was empty — return ${qMin}–${qMax} multiple-choice questions in "questions", each with its own options (2–4) and the answer letter`)
     else if (layout === 'multiple_choice' && spec.questions.length < minQ) issues.push(`only ${spec.questions.length} questions (min ${minQ})`)
   }
@@ -819,6 +830,85 @@ export function pairsToDrop(conflicts = []) {
   return drop.sort((a, b) => a - b)
 }
 
+// ── Matching replacement pairs ───────────────────────────────────────────────
+// When the self-check's flagged pairs leave fewer than MATCHING_DROP_MIN_PAIRS, one
+// small Groq call asks for only the missing pairs, with every kept and dropped term
+// listed as off-limits (and their near-synonyms), instead of re-asking the whole page.
+// The merged page must pass the code checks (has rings, same match, …) and, when the
+// self-check is on, a second self-check; otherwise the page goes to the next attempt.
+export const MATCHING_REPLACE_MAX_TOKENS = 1500
+export const matchingReplaceTool = {
+  type: 'function',
+  function: {
+    name: 'replacement_pairs',
+    description: 'New matching pairs whose terms are clearly different from every listed term',
+    parameters: {
+      type: 'object',
+      properties: {
+        pairs: { type: 'array', items: { type: 'object', properties: { term: { type: 'string' }, match: { type: 'string' } }, required: ['term', 'match'] } },
+      },
+      required: ['pairs'],
+    },
+  },
+}
+
+/** Prompt for `need` replacement pairs; kept pairs are shown, kept + dropped terms are off-limits. Pure. */
+export function buildMatchingReplacePrompt(plan, page, { kept, dropped, need }) {
+  return `A ${plan.gradeLevel} ${plan.subject} matching worksheet ("${plan.setTitle}", page: ${page.imagePrompt ?? page.title ?? ''}) needs ${need} more pair(s) of {term, match}.
+
+Pairs already on the page (keep them; do not repeat them):
+${kept.map(p => `- ${p.term} – ${p.match}`).join('\n')}
+
+Do NOT use these terms, or any near-synonym, stage, part or whole of them, or anything that does the same job: ${[...kept, ...dropped].map(p => `"${p.term}"`).join(', ')}.
+
+Each new match must be TRUE for its own term and FALSE for every other term on the page (the kept ones too): a definition or a fact unique to it, never a property several terms share, never reusing another pair's key words, never containing its own term. Term ≤${LIMITS.term} chars, match ≤12 words, words a ${plan.gradeLevel} student can read.
+
+Call replacement_pairs with exactly ${need} pair(s).`
+}
+
+/** One Groq call for replacement pairs. Returns [{ term, match }] (maybe empty). Throws on API errors. */
+async function fetchReplacementPairsGroq(plan, page, ctx, stats) {
+  const t0 = Date.now()
+  try {
+    const res = await callTool(groq(), {
+      model: MODELS.content,
+      maxTokens: MATCHING_REPLACE_MAX_TOKENS,
+      tool: matchingReplaceTool,
+      messages: [{ role: 'user', content: buildMatchingReplacePrompt(plan, page, ctx) }],
+      label: 'Groq matching replacement',
+      step: 'content',
+    })
+    stats?.calls.push({ kind: 'matching_replace', pages: 1, ms: Date.now() - t0, usage: res.usage ?? null, ok: !!res.args })
+    return arr(res.args?.pairs)
+  } catch (err) {
+    stats?.calls.push({ kind: 'matching_replace', pages: 1, ms: Date.now() - t0, error: err.status ?? err.message, code: err.error?.code ?? err.code })
+    throw err
+  }
+}
+
+/**
+ * Kept pairs + `need` replacement pairs as a validated normalized page, or null (call
+ * failed, too few usable pairs, code checks fail, or the self-check flags it again).
+ */
+async function replacePairs({ plan, c, kept, dropped, valid, fetchReplacements, selfCheck, solveMatching, stats }) {
+  const need = MATCHING_DROP_MIN_PAIRS - kept.length
+  let raw
+  try {
+    raw = await fetchReplacements(plan, c.page, { kept, dropped, need }, stats)
+  } catch (err) {
+    console.warn(`matching replacement p${c.page.pageNum} failed (${err.status ?? err.message}) — page re-asked`)
+    return null
+  }
+  const taken = new Set([...kept, ...dropped].map(p => norm(p.term)))
+  const fresh = dedupeBy(arr(raw).map(p => ({ term: s(p?.term), match: s(p?.match) })).filter(p => p.term && p.match && !taken.has(norm(p.term))), p => norm(p.term)).slice(0, need)
+  if (fresh.length < need) return null
+  const n = valid({ ...c.n.spec, pairs: [...kept, ...fresh] }, `replaced ${dropped.length} ambiguous matching pair(s)`)
+  if (!n || !selfCheck) return n
+  const r = await selfCheckMatching(plan, n.spec, { ...(solveMatching ? { solve: solveMatching } : {}), stats })
+  if (r.error) return n // fail-open, like the first self-check
+  return r.ambiguous ? null : n
+}
+
 // ── Groq calls ───────────────────────────────────────────────────────────────
 /** Ask Groq for a chunk of pages. Returns raw pages[] or null on failure. */
 async function fetchHybridChunk(plan, pages, feedback, stats) {
@@ -842,11 +932,31 @@ async function fetchHybridChunk(plan, pages, feedback, stats) {
 }
 
 /**
+ * Pair each planned page of a call with its raw answer: by pageNum (number or "5"),
+ * else — when the answer has no pageNum — by position among the answers. Pure.
+ */
+export function matchRawPages(group, raws = []) {
+  const list = (Array.isArray(raws) ? raws : []).filter(r => r && typeof r === 'object')
+  const numOf = (r) => { const n = Number(String(r.pageNum ?? '').match(/\d+/)?.[0]); return Number.isFinite(n) && String(r.pageNum ?? '').trim() !== '' ? n : null }
+  const used = new Set()
+  return group.map((page, i) => {
+    let k = list.findIndex((r, j) => !used.has(j) && numOf(r) === page.pageNum)
+    if (k < 0 && list[i] && !used.has(i) && numOf(list[i]) === null) k = i
+    if (k < 0) return null
+    used.add(k)
+    return { ...list[k], pageNum: page.pageNum }
+  })
+}
+
+/**
  * Generate structured content for every worksheet/activity page. Returns
  * { pages: Map(pageNum → content), failed: page[], log } — `failed` pages need the
  * legacy fallback. `fetchChunk` is injectable for tests and the live eval.
  */
-export async function generateHybridPages(plan, contentPages, { fetchChunk = fetchHybridChunk, solveMatching, stats = null } = {}) {
+export async function generateHybridPages(plan, contentPages, { fetchChunk = fetchHybridChunk, solveMatching, fetchReplacements, stats = null } = {}) {
+  // Replacement pairs are a live Groq call: on by default only with the live content
+  // fetcher, so tests that mock fetchChunk never reach the network.
+  if (fetchReplacements === undefined) fetchReplacements = fetchChunk === fetchHybridChunk ? fetchReplacementPairsGroq : null
   const opts = (page) => ({ packageType: plan.packageType, plan, page: { ...page, title: page.title } })
   const done = new Map()
   const attempts = new Map(contentPages.map(p => [p.pageNum, []]))
@@ -866,9 +976,9 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
     const next = []
     const checked = []
     groups.forEach((group, gi) => {
-      const raws = results[gi] ?? []
-      for (const page of group) {
-        const raw = raws.find(r => r?.pageNum === page.pageNum)
+      const matched = matchRawPages(group, results[gi] ?? [])
+      for (const [pi, page] of group.entries()) {
+        const raw = matched[pi]
         if (!raw) {
           feedback.set(page.pageNum, ['the page was missing from your answer'])
           missing.add(page.pageNum)
@@ -884,24 +994,34 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
     // Matching pages that validated get the self-check (sequential, like every Groq call).
     const toSolve = selfCheck ? checked.filter(c => !c.issues.length && c.n.layout === 'matching') : []
     const solved = await mapWithConcurrency(toSolve, recheckConcurrency(), c => selfCheckMatching(plan, c.n.spec, { ...(solveMatching ? { solve: solveMatching } : {}), stats }))
-    toSolve.forEach((c, i) => {
+    for (const [i, c] of toSolve.entries()) {
       const r = solved[i]
       if (r.error) {
         console.warn(`matching self-check p${c.page.pageNum} failed (${r.error}) — page kept unchecked`)
         addReviewNote('fallback', `p${c.page.pageNum}: matching self-check failed (${r.error}) — check that every meaning fits only one term`)
       } else if (r.ambiguous) {
         const drop = pairsToDrop(r.conflicts)
-        const kept = dropPairs(c.n.spec, drop, MATCHING_DROP_MIN_PAIRS)
-        const n = kept && { ...c.n, spec: kept, repairs: [...c.n.repairs, `dropped ${drop.length} ambiguous matching pair(s)`] }
-        if (n && validateHybridPage(n, opts({ ...c.page, title: s(c.raw.title) })).length === 0) {
-          addReviewNote('fallback', `p${c.page.pageNum}: matching self-check found overlapping meanings — dropped ${drop.map(i => `"${c.n.spec.pairs[i].term}"`).join(', ')}; ${kept.pairs.length} pairs remain`)
-          c.n = n
-        } else {
+        const dropped = drop.map(j => c.n.spec.pairs[j])
+        const kept = c.n.spec.pairs.filter((_, j) => !drop.includes(j))
+        const pageOpts = opts({ ...c.page, title: s(c.raw.title) })
+        const valid = (spec, repair) => { const n = { ...c.n, spec, repairs: [...c.n.repairs, repair] }; return validateHybridPage(n, pageOpts).length === 0 ? n : null }
+        const droppedNames = dropped.map(p => `"${p.term}"`).join(', ')
+        let n = null
+        if (kept.length >= MATCHING_DROP_MIN_PAIRS) {
+          n = valid({ ...c.n.spec, pairs: kept }, `dropped ${drop.length} ambiguous matching pair(s)`)
+          if (n) addReviewNote('fallback', `p${c.page.pageNum}: matching self-check found overlapping meanings — dropped ${droppedNames}; ${kept.length} pairs remain`)
+        } else if (fetchReplacements) {
+          // Too few left: ask Groq for just the missing pairs; any failure → next attempt.
+          n = await replacePairs({ plan, c, kept, dropped, valid, fetchReplacements, selfCheck, solveMatching, stats })
+          if (n) addReviewNote('fallback', `p${c.page.pageNum}: matching self-check found overlapping meanings — replaced ${droppedNames} with ${n.spec.pairs.slice(kept.length).map(p => `"${p.term}"`).join(', ')}`)
+        }
+        if (n) c.n = n
+        else {
           c.issues = r.issues
-          ambiguous.set(c.page.pageNum, { ...c, offending: pairsToDrop(r.conflicts) })
+          ambiguous.set(c.page.pageNum, { ...c, offending: drop })
         }
       }
-    })
+    }
     for (const { page, raw, n, issues } of checked) {
       stats?.pages.push({ pageNum: page.pageNum, attempt, layout: n.layout, issues, repairs: n.repairs, raw })
       if (issues.length === 0) {
@@ -1156,8 +1276,8 @@ export async function recheckHybridContent(plan, pages, { check = recheckHybridP
  * solveMatching (Groq matching self-check), check (Groq recheck), legacy
  * (async (plan, pages) → [{ pageNum, ...legacyContent }]).
  */
-export async function generateHybridContent(plan, contentPages, { fetchChunk, solveMatching, check, legacy, stats } = {}) {
-  const { pages, failed } = await generateHybridPages(plan, contentPages, { fetchChunk, solveMatching, stats })
+export async function generateHybridContent(plan, contentPages, { fetchChunk, solveMatching, fetchReplacements, check, legacy, stats } = {}) {
+  const { pages, failed } = await generateHybridPages(plan, contentPages, { fetchChunk, solveMatching, fetchReplacements, stats })
   for (const [pn, v] of pages) v.repairs.forEach(r => console.log(`  p${pn}: repaired — ${r}`))
   const byNum = new Map(contentPages.map(p => [p.pageNum, p]))
   let structured = [...pages].map(([pageNum, v]) => ({ pageNum, content: v.content }))
