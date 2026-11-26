@@ -293,6 +293,57 @@ const VAGUE_MATCH = /^(?:(?:it|they) )?(?:is|are) (?:very |really |so )?(?:big|l
 // "Has rings" alone: true of every giant planet, the live failure this guards.
 const RINGS_MATCH = /^(?:(?:it|they) )?(?:has|have) (?:a )?(?:(?:system|set) of )?rings?(?: system)?(?: around (?:it|them))?$/
 
+// ── Numeric values (fractions, numerals, number words) ───────────────────────
+// A matching page about numbers ("1/3" ↔ "one third") is unambiguous when every value
+// is distinct, but the self-check flagged a third of such pages ("one third" is also
+// true of "1/2"). numericValue reads a text that is nothing but a number, so code can
+// overrule a claim between two different values and flag two equal ones ("1/2" and
+// "2/4") instead.
+const UNITS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen']
+const TENS = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 }
+const ORDINALS = { half: 2, halves: 2, third: 3, quarter: 4, fourth: 4, fifth: 5, sixth: 6, seventh: 7, eighth: 8, ninth: 9, tenth: 10, eleventh: 11, twelfth: 12, hundredth: 100 }
+const VULGAR = { '½': 1 / 2, '⅓': 1 / 3, '⅔': 2 / 3, '¼': 1 / 4, '¾': 3 / 4, '⅕': 1 / 5, '⅖': 2 / 5, '⅗': 3 / 5, '⅘': 4 / 5, '⅙': 1 / 6, '⅚': 5 / 6, '⅛': 1 / 8, '⅜': 3 / 8, '⅝': 5 / 8, '⅞': 7 / 8 }
+const cardinal = (w) => {
+  if (/^\d+$/.test(w)) return Number(w)
+  const i = UNITS.indexOf(w)
+  if (i >= 0) return i
+  const [tens, unit, extra] = w.split('-')
+  if (TENS[tens] === undefined || extra !== undefined) return null
+  if (unit === undefined) return TENS[tens]
+  const u = UNITS.indexOf(unit)
+  return u >= 1 && u <= 9 ? TENS[tens] + u : null
+}
+const denominator = (w) => {
+  if (ORDINALS[w]) return ORDINALS[w]
+  const sing = w.replace(/s$/, '')
+  if (ORDINALS[sing]) return ORDINALS[sing]
+  const m = w.match(/^(\d+)(?:st|nd|rd|th)s?$/)
+  return m ? Number(m[1]) : null
+}
+/** A fraction / proper value with its numerator over its denominator (null if not a number). */
+const ratio = (num, den) => (num === null || !den ? null : num / den)
+/**
+ * The value of a text that is only a number: "3", "2.5", "50%", "1/3", "1 1/2", "½",
+ * "one third", "two-thirds", "a half", "twenty-one", "3 out of 4 (equal parts)";
+ * null for anything else ("1/3 of a pizza", "less than one half"). Pure.
+ */
+export function numericValue(text) {
+  let t = s(text).toLowerCase().replace(/[.!]+$/, '').replace(/\s+/g, ' ').trim()
+  if (!t) return null
+  if (VULGAR[t] !== undefined) return VULGAR[t]
+  let m
+  if ((m = t.match(/^(\d+) ?([½⅓⅔¼¾⅕⅖⅗⅘⅙⅚⅛⅜⅝⅞])$/))) return Number(m[1]) + VULGAR[m[2]]
+  if ((m = t.match(/^-?\d+(?:\.\d+)?$/))) return Number(t)
+  if ((m = t.match(/^(\d+(?:\.\d+)?) ?(?:%|percent)$/))) return Number(m[1]) / 100
+  if ((m = t.match(/^(?:(\d+) )?(\d+) ?\/ ?(\d+)$/))) return (m[1] ? Number(m[1]) : 0) + ratio(Number(m[2]), Number(m[3]))
+  if ((m = t.match(/^(\S+) out of (\S+)(?: equal)?(?: parts?| pieces?| slices?| sections?)?(?: (?:are )?(?:shaded|colou?red))?$/))) return ratio(cardinal(m[1]), cardinal(m[2]))
+  t = t.replace(/^(\S+)-(halves|half|thirds?|quarters?|fourths?|fifths?|sixths?|sevenths?|eighths?|ninths?|tenths?|twelfths?)$/, '$1 $2')
+  if ((m = t.match(/^(\S+) (\S+)$/))) return ratio(m[1] === 'a' || m[1] === 'an' ? 1 : cardinal(m[1]), denominator(m[2]))
+  if (t === 'half') return 0.5
+  return cardinal(t)
+}
+const sameValue = (a, b) => Math.abs(a - b) < 1e-9
+
 /**
  * Ambiguity issues of a matching spec ([] = none found): meanings that are the same
  * after normalisation, a meaning that contains its own term, and bare shared
@@ -311,6 +362,17 @@ export function matchingIssues(pairs = []) {
     const bare = norm(p.match).replace(/[.!]+$/, '')
     if (VAGUE_MATCH.test(bare) || RINGS_MATCH.test(bare)) issues.push(`"${p.match}" (for "${p.term}") is a property several items share — use a fact true only for "${p.term}"`)
   })
+  // Two numeric matches (or terms) with the same value, written differently ("1/2" and
+  // "two fourths"): a student can pair either one. Identical texts are caught above.
+  for (const side of ['match', 'term']) {
+    const vals = pairs.map(p => numericValue(p[side]))
+    for (let i = 0; i < pairs.length; i++) {
+      for (let j = i + 1; j < pairs.length; j++) {
+        if (vals[i] === null || vals[j] === null || !sameValue(vals[i], vals[j]) || loose(pairs[i][side]) === loose(pairs[j][side])) continue
+        issues.push(`"${pairs[i][side]}" and "${pairs[j][side]}" are the same number — every ${side} must be a different value`)
+      }
+    }
+  }
   return issues
 }
 
@@ -655,13 +717,20 @@ export function matchingAmbiguity(spec, args) {
   const issues = []
   const offending = []
   const q = (v) => `"${s(v)}"`
+  // A purely numeric statement is true only of a term with the same value: a claim
+  // that "one third" also fits "1/2" is the checker's mistake, not an ambiguity.
+  const differentNumber = (j, t) => {
+    const a = numericValue(spec.pairs[j].match)
+    const b = numericValue(spec.pairs[t].term)
+    return a !== null && b !== null && !sameValue(a, b)
+  }
   for (let j = 0; j < n; j++) {
     const { best, also } = seen.get(j)
-    const others = [...new Set([best, ...also])].filter(t => t >= 0 && t !== j)
+    const others = [...new Set([best, ...also])].filter(t => t >= 0 && t !== j && !differentNumber(j, t))
     if (!others.length) continue
     offending.push(j)
     const { term, match } = spec.pairs[j]
-    issues.push(best >= 0 && best !== j
+    issues.push(best >= 0 && best !== j && !differentNumber(j, best)
       ? `ambiguous: a checker matched ${q(match)} to ${q(spec.pairs[best].term)}, not ${q(term)} — use a fact true only for ${q(term)}`
       : `ambiguous: the match ${q(match)} (for ${q(term)}) is also true for ${others.map(t => q(spec.pairs[t].term)).join(', ')} — use a fact true only for ${q(term)}`)
   }

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
   matchingIssues, sortingIssues, normalizeHybridPage, validateHybridPage, buildHybridContentPrompt,
   matchingAmbiguity, buildMatchingCheckPrompt, selfCheckMatching, matchingSelfCheckEnabled, matchingSolveTool,
-  dropPairs, generateHybridPages, generateHybridContent, HYBRID_MAX_ATTEMPTS,
+  dropPairs, generateHybridPages, generateHybridContent, HYBRID_MAX_ATTEMPTS, numericValue,
 } from '../src/steps/hybrid-content.js'
 import { matchingOrder, LETTERS } from '../src/lib/layout/specs.js'
 import { reviewNotes, resetReviewNotes } from '../src/lib/review-notes.js'
@@ -193,3 +193,68 @@ describe('generateHybridPages with the self-check (Groq mocked)', () => {
     expect(out.get(7).layout).toBe('multiple_choice')
   })
 })
+
+describe('numbers and fractions (self-check false positives)', () => {
+  const fractions = spec({ layout: 'matching', pairs: [
+    { term: '1/2', match: 'one half' }, { term: '1/3', match: 'one third' },
+    { term: '3/4', match: 'three quarters' }, { term: '2/5', match: 'two-fifths' },
+  ] })
+  const j = (term) => fractions.pairs.findIndex(p => p.term === term)
+
+  it('numericValue reads numerals, fractions and number words; other text is null', () => {
+    expect(numericValue('one third')).toBeCloseTo(1 / 3)
+    expect(numericValue('1/2')).toBe(0.5)
+    expect(numericValue('two-fifths')).toBeCloseTo(0.4)
+    expect(numericValue('a half')).toBe(0.5)
+    expect(numericValue('½')).toBe(0.5)
+    expect(numericValue('1 1/2')).toBe(1.5)
+    expect(numericValue('3 out of 4 equal parts')).toBe(0.75)
+    expect(numericValue('twenty-one')).toBe(21)
+    expect(numericValue('50%')).toBe(0.5)
+    for (const x of ['1/3 of a pizza', 'less than one half', 'Saturn', 'a', 'Has rings', '']) expect(numericValue(x), x).toBeNull()
+  })
+
+  it('code checks pass a page of distinct fraction values', () => {
+    expect(matchingIssues(fractions.pairs)).toEqual([])
+    expect(validateHybridPage(normalizeHybridPage({ layout: 'matching', pairs: fractions.pairs }), opts)).toEqual([])
+    expect(matchingIssues([{ term: '12', match: 'twelve' }, { term: '20', match: 'twenty' }, { term: '21', match: 'twenty-one' }])).toEqual([])
+  })
+
+  it('ignores a self-check claim that "one third" also fits "1/2" (different values)', () => {
+    const r = matchingAmbiguity(fractions, answer(fractions, { [j('1/3')]: [j('1/3') + 1, j('1/2') + 1] }))
+    expect(r).toMatchObject({ valid: true, ambiguous: false, offending: [] })
+    // and a checker that matched "one third" to "1/2" outright is overruled too
+    const r2 = matchingAmbiguity(fractions, answer(fractions, { [j('1/3')]: [j('1/2') + 1] }))
+    expect(r2.ambiguous).toBe(false)
+  })
+
+  it('still flags equal values: equivalent fractions in code, and a self-check claim between equal values', () => {
+    const eq = [{ term: '1/2', match: 'one half' }, { term: '2/4', match: 'two fourths' }, { term: '1/3', match: 'one third' }]
+    expect(matchingIssues(eq)).toEqual([
+      '"one half" and "two fourths" are the same number — every match must be a different value',
+      '"1/2" and "2/4" are the same number — every term must be a different value',
+    ])
+    const sp = spec({ layout: 'matching', pairs: [...eq, { term: '3/4', match: 'three quarters' }] })
+    const half = sp.pairs.findIndex(p => p.term === '1/2')
+    const quarters = sp.pairs.findIndex(p => p.term === '2/4')
+    const r = matchingAmbiguity(sp, answer(sp, { [half]: [half + 1, quarters + 1] }))
+    expect(r.offending).toEqual([half])
+  })
+
+  it('non-numeric statements on a number page are still judged by the self-check', () => {
+    const sp = spec({ layout: 'matching', pairs: [
+      { term: '1/2', match: 'Less than one whole' }, { term: '1/3', match: 'one third' },
+      { term: '3/4', match: 'three quarters' }, { term: '2/5', match: 'two-fifths' },
+    ] })
+    const k = sp.pairs.findIndex(p => p.term === '1/2')
+    const r = matchingAmbiguity(sp, answer(sp, { [k]: [k + 1, sp.pairs.findIndex(p => p.term === '1/3') + 1] }))
+    expect(r.offending).toEqual([k])
+  })
+
+  it('real ambiguities are unchanged: "has rings" is rejected in code and by the self-check', async () => {
+    expect(matchingIssues([{ term: 'Saturn', match: 'Has rings' }])).toHaveLength(1)
+    const sp = spec(ringsPageReworded)
+    expect(matchingAmbiguity(sp, await truthSolver(plan, sp)).ambiguous).toBe(true)
+  })
+})
+
