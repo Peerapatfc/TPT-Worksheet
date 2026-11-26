@@ -59,6 +59,9 @@ jobs:
           CLOUDFLARE_API_TOKEN:        ${{ secrets.CLOUDFLARE_API_TOKEN }}
           BRAINSTORM_PROVIDER:         ${{ vars.BRAINSTORM_PROVIDER }}
           RECHECK_CONCURRENCY:         ${{ vars.RECHECK_CONCURRENCY }}
+          PAGE_RENDERER:               ${{ vars.PAGE_RENDERER }}
+          ILLUSTRATION_CONCURRENCY:    ${{ vars.ILLUSTRATION_CONCURRENCY }}
+          MARKET_CHECK_SEARCH_DAY:     ${{ vars.MARKET_CHECK_SEARCH_DAY }}
 
       - name: Upload logs
         if: always()
