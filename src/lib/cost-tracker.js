@@ -1,4 +1,7 @@
-import { PRICING } from '../config/constants.js'
+import { PRICING, MODELS } from '../config/constants.js'
+
+/** Models billed by OpenAI (gpt-oss-120b is served by Groq, FLUX by Cloudflare). */
+export const OPENAI_MODELS = new Set([MODELS.brainstorm, MODELS.validate, MODELS.reconcile, MODELS.image])
 
 // In-process accumulator of API token usage, keyed by pipeline step + model.
 // Every successful API call records here; the orchestrator logs costSummary()
@@ -32,7 +35,9 @@ const round = (n) => Math.round(n * 10000) / 10000
 
 /**
  * Per-step breakdown (most expensive first) plus total. `totalUsd` only sums
- * steps with known pricing; `unpricedModels` lists any that were skipped.
+ * steps with known pricing (Groq at its paid-tier rate, even on the free tier);
+ * `unpricedModels` lists any that were skipped. `openaiCalls` / `openaiUsd` cover
+ * OpenAI-billed models only — both 0 in a PAGE_RENDERER=hybrid-only run.
  */
 export function costSummary() {
   const byStep = [...usageByKey.values()]
@@ -43,7 +48,10 @@ export function costSummary() {
     .sort((a, b) => (b.usd ?? -1) - (a.usd ?? -1))
   const totalUsd = round(byStep.reduce((sum, e) => sum + (e.usd ?? 0), 0))
   const unpricedModels = [...new Set(byStep.filter(e => e.usd === null).map(e => e.model))]
-  return { totalUsd, byStep, ...(unpricedModels.length ? { unpricedModels } : {}) }
+  const openaiSteps = byStep.filter(e => OPENAI_MODELS.has(e.model))
+  const openaiCalls = openaiSteps.reduce((n, e) => n + e.calls, 0)
+  const openaiUsd = round(openaiSteps.reduce((sum, e) => sum + (e.usd ?? 0), 0))
+  return { totalUsd, openaiUsd, openaiCalls, byStep, ...(unpricedModels.length ? { unpricedModels } : {}) }
 }
 
 /** Clear all recorded usage (for tests). */
