@@ -13,6 +13,15 @@ export function isQuotaExhausted(err) {
   )
 }
 
+/**
+ * True for a 429 from a DAILY limit — Groq's "on tokens per day (TPD)" or "on requests
+ * per day (RPD)". The window is rolling over a day, so waiting ≤60s ×3 cannot help and
+ * only delays the run; it must fail fast. Per-minute limits (TPM/RPM) stay retryable.
+ */
+export function isDailyLimitExhausted(err) {
+  return err?.status === 429 && /\b(tokens|requests) per day\b|\((TPD|RPD)\)/i.test(err.message ?? '')
+}
+
 /** Upper bound for any wait, so a pathological header cannot hang CI. */
 export const MAX_RETRY_DELAY_MS = 60_000
 const JITTER_MS = 500
@@ -74,7 +83,7 @@ export function retryDelayMs(err, attempt, { baseMs = RETRY.baseDelayMs, maxMs =
 /**
  * Retry an async API call with exponential backoff on transient errors.
  * Only 429 (rate limit), 500, and 503 are retried; everything else — including a
- * 429 for exhausted credits/quota — throws immediately.
+ * 429 for exhausted credits/quota or a daily (TPD/RPD) limit — throws immediately.
  *
  * @param {() => Promise<T>} fn
  * @param {{ maxAttempts?: number, baseDelayMs?: number, label?: string, sleep?: (ms: number) => Promise<void> }} [opts]
@@ -86,6 +95,10 @@ export async function withRetry(fn, { maxAttempts = RETRY.maxAttempts, baseDelay
     try {
       return await fn()
     } catch (err) {
+      if (isDailyLimitExhausted(err)) {
+        console.warn(`${label} 429: daily rate limit (TPD/RPD) reached — not retrying`)
+        throw err
+      }
       const retryable = (err.status === 429 && !isQuotaExhausted(err)) || err.status === 503 || err.status === 500
       if (!retryable || attempt === maxAttempts) throw err
       const delay = retryDelayMs(err, attempt, { baseMs: baseDelayMs })

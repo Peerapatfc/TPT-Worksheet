@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { withRetry, isQuotaExhausted, retryDelayMs, MAX_RETRY_DELAY_MS } from '../src/llm/with-retry.js'
+import { withRetry, isQuotaExhausted, isDailyLimitExhausted, retryDelayMs, MAX_RETRY_DELAY_MS } from '../src/llm/with-retry.js'
 
 const apiError = (status, extra = {}) => Object.assign(new Error(extra.message ?? `${status}`), { status, ...extra })
 const opts = { maxAttempts: 4, baseDelayMs: 0, label: 'test' }
@@ -115,5 +115,45 @@ describe('withRetry wait hint', () => {
     const fn = vi.fn().mockRejectedValue(apiError(400, { headers: { 'retry-after': '5' } }))
     await expect(withRetry(fn, { ...opts, sleep })).rejects.toMatchObject({ status: 400 })
     expect(sleep).not.toHaveBeenCalled()
+  })
+})
+
+describe('daily rate limits (Groq TPD/RPD)', () => {
+  vi.spyOn(console, 'warn').mockImplementation(() => {})
+  const TPD = 'Rate limit reached for model `openai/gpt-oss-120b` in organization org_01abc service tier on_demand on tokens per day (TPD): Limit 200000, Used 199548, Requested 810. Please try again in 2m34.656s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing'
+  const RPD = 'Rate limit reached for model `openai/gpt-oss-120b` in organization org_01abc service tier on_demand on requests per day (RPD): Limit 1000, Used 1000, Requested 1. Please try again in 1m26.4s.'
+  const TPM = 'Rate limit reached for model `openai/gpt-oss-120b` in organization org_01abc service tier on_demand on tokens per minute (TPM): Limit 8000, Used 7900, Requested 1200. Please try again in 5.2s. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing'
+
+  it('detects TPD / RPD messages only on a 429', () => {
+    expect(isDailyLimitExhausted(apiError(429, { message: TPD }))).toBe(true)
+    expect(isDailyLimitExhausted(apiError(429, { message: `429 ${RPD}` }))).toBe(true)
+    expect(isDailyLimitExhausted(apiError(429, { message: TPM }))).toBe(false)
+    expect(isDailyLimitExhausted(apiError(500, { message: TPD }))).toBe(false)
+    expect(isDailyLimitExhausted(undefined)).toBe(false)
+  })
+
+  it('throws a TPD 429 at once without sleeping', async () => {
+    const sleep = vi.fn()
+    const fn = vi.fn().mockRejectedValue(apiError(429, { message: TPD, headers: { 'retry-after': '155' } }))
+    await expect(withRetry(fn, { ...opts, sleep })).rejects.toThrow(/tokens per day \(TPD\)/)
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect(sleep).not.toHaveBeenCalled()
+  })
+
+  it('throws an RPD 429 at once', async () => {
+    const fn = vi.fn().mockRejectedValue(apiError(429, { message: RPD }))
+    await expect(withRetry(fn, { ...opts, sleep: vi.fn() })).rejects.toMatchObject({ status: 429 })
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
+  it('still retries a TPM 429 using its hint', async () => {
+    const sleep = vi.fn().mockResolvedValue()
+    const fn = vi.fn()
+      .mockRejectedValueOnce(apiError(429, { message: TPM, headers: { 'retry-after': '6' } }))
+      .mockResolvedValue('ok')
+    await expect(withRetry(fn, { ...opts, sleep })).resolves.toBe('ok')
+    expect(fn).toHaveBeenCalledTimes(2)
+    expect(sleep).toHaveBeenCalledOnce()
+    expect(sleep.mock.calls[0][0]).toBeGreaterThanOrEqual(6000)
   })
 })
