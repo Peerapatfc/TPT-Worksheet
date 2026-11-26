@@ -87,7 +87,7 @@ export const isShortAnswer = (answer) => { const a = cleanText(answer).trim(); r
 export const answerLineCount = (answer) => { const n = cleanText(answer).trim().length; return n <= 45 ? 1 : n <= 110 ? 2 : 3 }
 
 // ── Blocks: build(width) → { h, render(x, y) → { svg, boxes } } | null ────────
-export function questionRow(q, s, pal, index) {
+export function questionRow(q, s, pal, index, { maxAnswerLines = Infinity } = {}) {
   return {
     build(width) {
       const padX = s * 0.45
@@ -106,7 +106,7 @@ export function questionRow(q, s, pal, index) {
       const firstBase = r + s * 0.36 // relative to content top: text centred on the badge
       const textBottom = firstBase + (lines.length - 1) * lh + DESC * s
       let contentH = Math.max(textBottom, 2 * r)
-      const nLines = mode === 'lines' ? answerLineCount(q.answer) : 0
+      const nLines = mode === 'lines' ? Math.min(answerLineCount(q.answer), maxAnswerLines) : 0
       if (mode === 'box') contentH = Math.max(contentH, boxH)
       else contentH += nLines * s * 1.85
       const h = contentH + 2 * padY
@@ -437,6 +437,30 @@ export function questionsPageSvg(plan, pg, { art = null } = {}) {
     blocksFor: (s, pal) => qs.map((q, i) => questionRow(q, s, pal, i)),
     twoColumn: true,
   })
+}
+
+/** Font sizes of the compact last-resort layout (14px is the floor). */
+export const COMPACT_SIZES = [16, 15, 14]
+
+/**
+ * Compact `questions` layout — the PAGE_RENDERER=hybrid-only last resort when no
+ * other layout fits: one-line instruction, no illustration, one writing line per
+ * question, tighter rows, two columns allowed, 16 → 14px. Throws
+ * LayoutOverflowError when even that does not fit (the caller then trims questions).
+ */
+export function compactQuestionsPageSvg(plan, pg) {
+  const qs = pg.content.questions
+  const sh = shell(plan, pg, 'Answer each question.', { maxLines: 1 })
+  const body = compose({
+    top: sh.top,
+    blocksFor: (s) => qs.map((q, i) => questionRow(q, s, sh.pal, i, { maxAnswerLines: 1 })),
+    sizes: COMPACT_SIZES,
+    art: null,
+    pal: sh.pal,
+    rowGap: 0.3,
+    twoColumn: true,
+  })
+  return { svg: pageDoc(sh.svg, body.svg), boxes: [...sh.boxes, ...body.boxes], meta: { ...body.meta, compact: true } }
 }
 
 /**

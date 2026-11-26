@@ -38,6 +38,16 @@ export function parseWordBank(spec) {
 }
 
 /**
+ * True when a question only makes sense next to a drawn picture / activity layout or
+ * reads something printed elsewhere on the page (the same tests the classifier uses).
+ * Pure — exported for the hybrid-only renderer, which drops such questions.
+ */
+export function questionNeedsPage(question) {
+  const q = String(question ?? '')
+  return PICTURE_WORDS.test(q) || ACTIVITY_VERB.test(q) || NEEDS_PAGE.some(re => re.test(q))
+}
+
+/**
  * @returns {{ layout: 'questions'|'fill_blank'|null, reason?: string, wordBank?: string[] }}
  * Pure — exported for unit testing.
  */
