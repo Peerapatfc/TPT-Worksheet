@@ -7,17 +7,8 @@ import { addReviewNote } from './review-notes.js'
 import { renderLayout, LAYOUT_REGISTRY } from './layout/index.js'
 import { pageIllustrationSubject, buildPageIllustrationPrompt, buildColoringPrompt } from './illustrations.js'
 
-/**
- * PAGE_RENDERER → 'hybrid' | 'openai'. Unset/empty = 'openai' (default);
- * unknown values fall back to 'openai' with a warning. Pure apart from the warning.
- */
-export function pageRenderer(env = process.env) {
-  const v = String(env.PAGE_RENDERER ?? '').trim().toLowerCase()
-  if (!v || v === 'openai') return 'openai'
-  if (v === 'hybrid') return 'hybrid'
-  console.warn(`Unknown PAGE_RENDERER "${v}" — using openai`)
-  return 'openai'
-}
+// PAGE_RENDERER parsing lives in src/config/renderer.js (the OpenAI client guard needs it too).
+export { pageRenderer, isHybridRenderer, isHybridOnly } from '../config/renderer.js'
 
 /** Build the page SVG for a classified layout. `spec` is the layout's typed spec (fill_blank: { wordBank }). Pure. */
 export function hybridPageSvg(plan, page, { layout, wordBank, spec, art }) {

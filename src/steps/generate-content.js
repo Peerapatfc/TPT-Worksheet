@@ -8,7 +8,7 @@ import { mapWithConcurrency, readConcurrency } from '../lib/concurrency.js'
 import { addReviewNote } from '../lib/review-notes.js'
 import { quotesMissingFromSpec } from '../lib/spec-consistency.js'
 import { validateChart, repairChart, CHART_TYPES, CHART_ICONS, CHART_LIMITS } from '../lib/chart-page.js'
-import { pageRenderer } from '../lib/hybrid-page.js'
+import { isHybridRenderer } from '../config/renderer.js'
 import { generateHybridContent } from './hybrid-content.js'
 
 const contentTool = {
@@ -478,8 +478,8 @@ export function stripAnswerLeaks(contentData) {
 export async function generateContent(plan) {
   const contentPages = plan.pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
   if (contentPages.length === 0) return plan
-  // PAGE_RENDERER=hybrid: structured layout specs instead of imageSpec (hybrid-content.js).
-  if (pageRenderer() === 'hybrid') return generateContentHybrid(plan, contentPages)
+  // PAGE_RENDERER=hybrid / hybrid-only: structured layout specs instead of imageSpec (hybrid-content.js).
+  if (isHybridRenderer()) return generateContentHybrid(plan, contentPages)
 
   const MAX_RETRIES = 2
   let contentData = null
