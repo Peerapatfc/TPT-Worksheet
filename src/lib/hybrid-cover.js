@@ -6,9 +6,9 @@ import { generateIllustration, hasCloudflareCreds } from '../llm/flux.js'
 import { hybridCoverSvg, marketingCoverSvg, renderSvg } from './svg-templates.js'
 import { motifBlock, themeMotif, palette } from './layout/decor.js'
 import { addReviewNote } from './review-notes.js'
+import { NO_TEXT, textFreeSubject, topicObjects } from './flux-subject.js'
 
 export const ILLUSTRATION_STYLE = "cute flat-color children's book illustration, bright colors, clean outlines, white background, vignette composition centered on white"
-const NO_TEXT = 'no text, no letters, no numbers'
 export const MAX_PROMPT_CHARS = 900
 
 /** COVER_RENDERER=hybrid and Cloudflare credentials present. Pure. */
@@ -52,8 +52,11 @@ export function coverSubjects(plan) {
     .map(s => tidy(s.replace(TEXT_PHRASE, '').replace(LAYOUT_PHRASE, '').replace(POSITION, '').replace(PAGE_WORDS, '')))
     .filter(s => /[a-z]{3}/i.test(s))
     .map(s => (/[.!?]$/.test(s) ? s : `${s}.`))
-  const subjects = tidy(sentences.join(' '))
+  // No chalkboards, signs, books or equations: FLUX writes on them ("2₄ = 2").
+  const subjects = textFreeSubject(tidy(sentences.join(' ')))
   if (subjects.length >= 15) return subjects
+  const objects = topicObjects(plan.setTitle, plan.subject)
+  if (objects) return `a cheerful scene of ${objects}`
   const topic = [plan.subject, plan.setTitle].filter(Boolean).join(': ')
   return `a cheerful scene of children's book characters and objects about ${topic || 'learning'}`
 }

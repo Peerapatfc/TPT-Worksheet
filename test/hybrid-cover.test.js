@@ -82,7 +82,7 @@ describe('cover illustration prompt', () => {
     const p = buildIllustrationPrompt(plan('a fox and an owl '.repeat(200)))
     expect(p.length).toBeLessThanOrEqual(MAX_PROMPT_CHARS)
     expect(p).toMatch(/^cute flat-color children's book illustration/)
-    expect(p).toMatch(/no text, no letters, no numbers$/)
+    expect(p).toMatch(/no text, no letters, no numbers, no equations, no writing, no chalkboard writing, no signs, no labels, no symbols$/)
   })
 })
 
