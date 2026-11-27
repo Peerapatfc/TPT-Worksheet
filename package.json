@@ -9,6 +9,7 @@
     "test:plan": "node scripts/test-plan.js",
     "create-issue": "node scripts/create-issue.js",
     "eval": "node scripts/eval.js",
+    "eval:hybrid": "node scripts/eval-hybrid.js",
     "render:samples": "node scripts/render-samples.js"
   },
   "dependencies": {
