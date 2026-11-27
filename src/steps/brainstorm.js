@@ -4,6 +4,7 @@ import { recordUsage } from '../lib/cost-tracker.js'
 import { PAGE_RANGES } from '../config/constants.js'
 import { TPT_SUBJECT_AREAS, TPT_TAGS } from '../config/tpt-taxonomy.js'
 import { worksheetPlanTool } from './schema/worksheet-plan.js'
+import { isHybridOnly } from '../config/renderer.js'
 
 /**
  * Largest even worksheet count N that keeps total pages (1 + N + ceil(N/2))
@@ -177,6 +178,13 @@ Each answer_key MUST have sourcePageNums set to an array of the 1–2 pageNums i
 ${sorLanguage}
 ${seasonalLanguage}`
 
+  // PAGE_RENDERER=hybrid-only: pages are typeset by code layouts, so plan only what a
+  // layout prints (a live set planned number-line and word-problem pages that came
+  // out as shape-naming drills). Empty otherwise — the default prompt is unchanged.
+  const hybridOnlyBlock = isHybridOnly(deps.env ?? process.env)
+    ? `\n\nEvery worksheet page is typeset by code, which can print ONLY: short-answer questions or word problems (text), multiple choice, fill-in-the-blank with a word bank, matching, sorting into 2–3 columns, labeling one picture, a table to complete, fraction pictures (circles/bars to shade or name), counting pictures, 2D shapes (only on a shapes/geometry page), single-series picture/bar graphs, and a colouring page. Never plan number lines, clocks, rulers, maps, grids, arrays, base-ten blocks or diagrams with numbers — write such a skill as questions in words. Give each page a different skill or format; never plan two pages with the same activity on the same numbers.`
+    : ''
+
   const seasonalContextBlock = currentMonth
     ? `Current month: ${currentMonth}. Favor topics that are seasonally relevant or timely for this month if a strong seasonal angle exists. If no strong seasonal angle, pick the best topic regardless of season.\n\n`
     : ''
@@ -192,7 +200,7 @@ Never plan crossword puzzles, word searches, mazes, or dot-to-dot pages — the 
 
 For graphing sets, plan only single-series picture graphs, bar graphs and data tables (code draws these exactly). Never plan pie charts, line graphs, double/grouped bar graphs, or "find the mistake in this graph" / misdrawn-graph pages — the image generator cannot draw their values correctly.
 
-Every page must have answers a teacher can check in an answer key. Do not plan pages that depend on what the student draws, collects, observes or writes about their own life (draw-your-own, collages, nature walks, "write a story about…") — plan labeling, matching, sorting, fill-in or short-answer pages with one correct answer. Keep vocabulary at the set's grade level (word banks and labels must use words that grade can read), and do not plan matching pictures of look-alike items (e.g. different leaf species) that the image generator cannot draw reliably.
+Every page must have answers a teacher can check in an answer key. Do not plan pages that depend on what the student draws, collects, observes or writes about their own life (draw-your-own, collages, nature walks, "write a story about…") — plan labeling, matching, sorting, fill-in or short-answer pages with one correct answer. Keep vocabulary at the set's grade level (word banks and labels must use words that grade can read), and do not plan matching pictures of look-alike items (e.g. different leaf species) that the image generator cannot draw reliably.${hybridOnlyBlock}
 
 Step 3: For the tptListing, pick 1–3 subjectAreas from this exact list ONLY (use exact strings):
 ${subjectList}

@@ -175,23 +175,185 @@ export const hybridContentTool = {
 }
 
 // ── Layout hint ──────────────────────────────────────────────────────────────
+// First match wins. "fraction" is a topic, not a format: on its own it used to send
+// every fractions page (matching, multiple choice, number line, word problems) to
+// `shapes`, so it is the last, weakest hint; explicit format words come first. No
+// layout draws a number line (and word problems are text): those go to `questions`.
 const HINTS = [
   ['chart', /\b(picture graph|pictograph|bar graph|tally (chart|marks)|graph)\b/i],
-  ['shapes', /\b(fractions?|shade|shaded|polygons?|shapes?|sides|corners|vertices|count the)\b/i],
+  ['shapes', /\b(shade|shaded|shading|polygons?|shapes?|sides|corners|vertices|count the)\b/i],
   ['matching', /\b(match(es|ing)?|connect|draw a line|pair)\b/i],
   ['sorting', /\b(sort(ing)?|classify|categor(y|ies|ize)|group the|columns? for)\b/i],
+  ['questions', /\b(number lines?|word problems?|story problems?)\b/i],
   ['labeling', /\b(label(l?ing|l?ed)?|diagram|parts of)\b/i],
   ['table_fill', /\b(table|chart to complete|fill in the chart)\b/i],
   ['activity_art', /\b(colou?r(ing)?|draw and|trace)\b/i],
   ['fill_blank', /\b(fill[- ]in|blanks?|word bank|complete the sentences?|missing word)\b/i],
   ['multiple_choice', /\b(multiple[- ]choice|quiz|true or false|true\/false|circle the correct)\b/i],
+  ['shapes', /\b(fractions?|fraction (?:strips|bars|circles|models))\b/i],
 ]
 
 /** Layout suggested by the brainstorm page description (keyword hint; Groq may override). Pure. */
 export function suggestLayout(page) {
-  const text = `${page?.filename ?? ''} ${page?.imagePrompt ?? ''}`.replace(/[-_]+/g, ' ')
-  return HINTS.find(([, re]) => re.test(text))?.[0] ?? 'questions'
+  return hintedLayouts(page)[0]
 }
+
+const pageText = (page) => `${page?.filename ?? ''} ${page?.imagePrompt ?? ''}`.replace(/[-_]+/g, ' ')
+/** Every layout the page description hints at, in HINTS order ('questions' when none). Pure. */
+export function hintedLayouts(page) {
+  const text = pageText(page)
+  const hits = HINTS.filter(([, re]) => re.test(text)).map(([l]) => l)
+  return hits.length ? [...new Set(hits)] : ['questions']
+}
+
+// ── Layout variety ───────────────────────────────────────────────────────────
+// A live Grade 4 fractions set had 9 of 16 pages on `shapes` (every "fraction" page
+// was hinted there), mostly the same drill. No layout may take more than
+// LAYOUT_CAP_SHARE of a set's content pages (at least LAYOUT_CAP_MIN); `chart` is
+// exempt (a graphing set is mostly charts and each chart has its own data).
+export const LAYOUT_CAP_SHARE = 0.4
+export const LAYOUT_CAP_MIN = 3
+const CAP_EXEMPT = new Set(['chart'])
+// Where surplus pages go: text layouts that can carry any topic.
+const SURPLUS_LAYOUTS = ['multiple_choice', 'fill_blank', 'matching', 'questions', 'sorting', 'table_fill']
+export const layoutCap = (n) => Math.max(LAYOUT_CAP_MIN, Math.floor(n * LAYOUT_CAP_SHARE))
+
+/** Least-used surplus layout still under the cap (ties → SURPLUS_LAYOUTS order). Pure. */
+export function surplusLayout(counts, cap, exclude = null) {
+  const open = SURPLUS_LAYOUTS.filter(l => l !== exclude && (counts.get(l) ?? 0) < cap)
+  const pool = open.length ? open : SURPLUS_LAYOUTS.filter(l => l !== exclude)
+  return pool.reduce((best, l) => ((counts.get(l) ?? 0) < (counts.get(best) ?? 0) ? l : best), pool[0])
+}
+
+/**
+ * Suggested layout per content page (Map pageNum → layout), in page order: the first
+ * hinted layout still under the cap, else the least-used surplus layout. Pure and
+ * deterministic.
+ */
+export function assignLayouts(pages = []) {
+  const cap = layoutCap(pages.length)
+  const counts = new Map()
+  const out = new Map()
+  for (const p of pages) {
+    const hinted = hintedLayouts(p)
+    const pick = hinted.find(l => CAP_EXEMPT.has(l) || (counts.get(l) ?? 0) < cap) ?? surplusLayout(counts, cap)
+    counts.set(pick, (counts.get(pick) ?? 0) + 1)
+    out.set(p.pageNum, pick)
+  }
+  return out
+}
+
+// ── Topic fit ────────────────────────────────────────────────────────────────
+// Polygon items (name / sides / corners) belong only on a shapes/geometry page: a
+// live fractions set printed "Fraction Number Line Equivalence" as two "What is the
+// name of this shape?" items (circle, triangle). Decided from the PLAN page (not
+// Groq's own title, which could be retitled to fit) and the set title/subject.
+const GEOMETRY_TOPIC = /\b(geometry|geometric|shapes?|polygons?|[23][- ]?d|two[- ]dimensional|three[- ]dimensional|sides|corners|vertex|vertices|angles?|quadrilaterals?|triangles?|pentagons?|hexagons?|octagons?)\b/i
+const STRONG_GEOMETRY = /\b(geometry|geometric|polygons?|[23][- ]?d shapes?|quadrilaterals?|sides|corners|vertices)\b/i
+const FRACTION_TOPIC = /\bfractions?\b/i
+
+/** May a page draw polygon items (name a shape, count sides/corners)? Pure. */
+export function polygonsFitTopic(plan, page) {
+  const p = pageText(page)
+  if (FRACTION_TOPIC.test(p) && !STRONG_GEOMETRY.test(p)) return false
+  if (GEOMETRY_TOPIC.test(p)) return true
+  const set = `${plan?.setTitle ?? ''} ${plan?.subject ?? ''}`
+  return GEOMETRY_TOPIC.test(set) && !(FRACTION_TOPIC.test(set) && !STRONG_GEOMETRY.test(set))
+}
+
+// Same minimum as the text layouts' smallest (3) would leave a shapes page mostly
+// empty; the prompt asks for 4–8.
+export const SHAPES_MIN_ITEMS = 4
+
+// ── Title fit ────────────────────────────────────────────────────────────────
+// The printed subtitle is the content title. A title may not promise something the
+// layout does not print: a live set titled pages "Number Line …" and "… Word
+// Problems" over shape-naming drills. Offending phrases are removed in code (no
+// retry, no tokens) and the layout's own name is appended.
+const TITLE_CLAIMS = [
+  // No layout draws a number line.
+  [/\bnumber[- ]lines?\b/gi, () => false],
+  [/\b(?:word|story) problems?\b/gi, (l) => ['questions', 'multiple_choice', 'fill_blank'].includes(l)],
+  [/\b(?:visual )?models?\b|\b(?:fraction )?(?:strips?|tiles?)\b|\bshad(?:e|ed|ing)\b|\bvisual\b/gi, (l) => l === 'shapes'],
+  [/\bmultiple[- ]choice\b|\bquiz\b/gi, (l) => l === 'multiple_choice'],
+  [/\bmatch(?:ing)?\b/gi, (l) => l === 'matching'],
+  [/\bsort(?:ing)?\b/gi, (l) => l === 'sorting'],
+  [/\bfill[- ]?ins?\b|\bfill in the blanks?\b/gi, (l) => l === 'fill_blank'],
+  [/\blabel(?:l?ing)?\b/gi, (l) => l === 'labeling'],
+  [/\b(?:picture |bar )?graphs?\b|\bpictographs?\b/gi, (l) => l === 'chart'],
+  [/\bcolou?r(?:ing)?(?: page)?\b/gi, (l) => l === 'activity_art'],
+]
+function layoutNoun(layout, spec) {
+  if (layout === 'shapes') {
+    const kinds = new Set((spec?.items ?? []).map(i => i.kind))
+    return kinds.size === 1 && kinds.has('fraction') ? 'Fraction Models' : kinds.size === 1 && kinds.has('count') ? 'Counting' : 'Shapes'
+  }
+  return { questions: 'Practice', multiple_choice: 'Multiple Choice', fill_blank: 'Fill-In', matching: 'Matching', sorting: 'Sort', labeling: 'Labeling', table_fill: 'Table', chart: 'Graph', activity_art: 'Colouring Page' }[layout] ?? 'Practice'
+}
+
+/** The page title with claims its layout does not deliver removed (+ the layout's name). Pure. */
+export function fitPageTitle(title, layout, spec = {}) {
+  let t = String(title ?? '')
+  let changed = false
+  for (const [re, ok] of TITLE_CLAIMS) {
+    if (ok(layout) || !re.test(t)) continue
+    re.lastIndex = 0
+    t = t.replace(re, ' ')
+    changed = true
+  }
+  if (!changed) return title
+  t = t.replace(/\s+/g, ' ')
+    .replace(/(?:\s*[:&+,/|–—-]\s*|\s+\b(?:and|with|on|using|in|of|for|to|the|a|an)\b\s*)+$/i, '')
+    .replace(/^(?:\s*[:&+,/|–—-]\s*|\s*\b(?:and|with|on|using|in|of|for|to)\b\s+)+/i, '')
+    .replace(/\s+(?:and|&)\s+(?=(?:and|&)\b)/gi, ' ')
+    .trim()
+  // The title already names what the layout prints ("Match Fractions"): no noun.
+  if (TITLE_CLAIMS.some(([re, ok]) => ok(layout) && new RegExp(re.source, 'i').test(t))) return t
+  const have = new Set(t.toLowerCase().split(/\s+/))
+  const noun = layoutNoun(layout, spec).split(' ').filter(w => !have.has(w.toLowerCase())).join(' ')
+  return [t, noun].filter(Boolean).join(' ').trim()
+}
+
+// ── Duplicate pages ──────────────────────────────────────────────────────────
+// A live set printed page 12 with exactly page 9's five "shade 2/4 … 6/12" items.
+// Each page reduces to a set of normalised item signatures; a page whose items are
+// mostly (≥ DUPLICATE_OVERLAP) already on an earlier accepted page is re-asked.
+export const DUPLICATE_OVERLAP = 0.6
+const sig = (...parts) => parts.map(v => String(v ?? '').toLowerCase().replace(/[^\p{L}\p{N}/.]+/gu, ' ').trim()).join(' | ')
+
+/** Normalised item signatures of a normalized hybrid page (one per printed item). Pure. */
+export function itemSignatures(n) {
+  const { layout, spec = {}, questions = [] } = n ?? {}
+  const qa = (list) => (list ?? []).map(q => sig(q.question, q.answer))
+  switch (layout) {
+    case 'shapes':
+      // A fraction is the same drill whether drawn as a bar or a circle, shaded or named.
+      return new Set((spec.items ?? []).map(it => (it.kind === 'fraction' ? `fraction ${it.shaded}/${it.parts}` : it.kind === 'count' ? `count ${it.icon} ${it.count}` : `polygon ${it.shape} ${it.ask}`)))
+    case 'multiple_choice': return new Set((spec.questions ?? []).map(q => sig(q.question, q.options?.[mcAnswerIndex(q)] ?? q.answer)))
+    case 'matching': return new Set((spec.pairs ?? []).map(p => sig(p.term, p.match)))
+    case 'sorting': return new Set((spec.items ?? []).map(it => sig(it.word, it.category)))
+    case 'labeling': return new Set((spec.labels ?? []).map(l => sig(l.word, l.clue)))
+    case 'table_fill': return new Set([...(spec.rows ?? []).map(r => sig(...r.map(c => (c && typeof c === 'object' ? c.answer : c)))), ...qa(spec.questions)])
+    case 'activity_art': return new Set()
+    default: return new Set(qa(questions))
+  }
+}
+
+/**
+ * The earlier page a page mostly repeats: ≥ DUPLICATE_OVERLAP of its items (and at
+ * least 2) already on one accepted page. `accepted` = [{ pageNum, sigs }]. Returns
+ * { pageNum, shared: string[], total } or null. Pure.
+ */
+export function duplicateOf(sigs, accepted = []) {
+  if (sigs.size < 2) return null
+  for (const a of accepted) {
+    const shared = [...sigs].filter(x => a.sigs.has(x))
+    if (shared.length >= 2 && shared.length / sigs.size >= DUPLICATE_OVERLAP) return { pageNum: a.pageNum, shared, total: sigs.size }
+  }
+  return null
+}
+
+const duplicateIssue = (d) => `repeats page ${d.pageNum}: ${d.shared.length} of ${d.total} items are already on that page (${d.shared.slice(0, 8).map(x => `"${x.slice(0, 40)}"`).join(', ')}) — write different items that practise another part of the topic`
 
 // ── Prompt ───────────────────────────────────────────────────────────────────
 // The exact chart shape, used by the prompt and by the "chart missing" retry hint.
@@ -205,12 +367,16 @@ export function questionRange(packageType) {
   return packageType === 'free' ? [4, 5] : packageType === 'large' ? [5, 8] : [4, 6]
 }
 
-/** Hybrid content prompt for a chunk of pages. `feedback` maps pageNum → errors from a failed attempt. Pure. */
-export function buildHybridContentPrompt(plan, pages, feedback = new Map()) {
+/**
+ * Hybrid content prompt for a chunk of pages. `feedback` maps pageNum → errors from a
+ * failed attempt; `suggested` maps pageNum → the set-wide layout (assignLayouts),
+ * else the per-page hint. Pure.
+ */
+export function buildHybridContentPrompt(plan, pages, feedback = new Map(), suggested = null) {
   const [qMin, qMax] = questionRange(plan.packageType)
   const pageList = pages.map(p => {
     const fb = feedback.get(p.pageNum)
-    return `- Page ${p.pageNum} (${p.type}, suggested layout: ${suggestLayout(p)}): ${p.imagePrompt}${fb ? `\n  PREVIOUS ATTEMPT WAS REJECTED — fix: ${fb.join('; ')}` : ''}`
+    return `- Page ${p.pageNum} (${p.type}, suggested layout: ${suggested?.get(p.pageNum) ?? suggestLayout(p)}): ${p.imagePrompt}${fb ? `\n  PREVIOUS ATTEMPT WAS REJECTED — fix: ${fb.join('; ')}` : ''}`
   }).join('\n')
 
   return `You are a curriculum designer writing printable worksheets for Teachers Pay Teachers.
@@ -225,11 +391,12 @@ Every page is typeset by code from the structured data you return. Pick ONE layo
 - sorting: categories (a list of 2–3 heading strings, e.g. ["Living", "Nonliving"]) + sortItems [{word, category}], 6–12 items, each category used at least twice. Each word is 1–3 words (a short simile or idiom such as "as busy as a bee" may be up to ${LIMITS.word} characters), never a whole sentence, and its category is spelled exactly as one of the headings.
 - labeling: subject (one concrete thing drawn large, e.g. "a sunflower plant") + labels [{word, clue}], 4–6 labels. The student writes the word from the word bank next to each numbered clue. A clue describes the part's job or look in words and never contains its word.
 - table_fill: columns (2–4 headers) + rows (3–6 rows, each the same length as columns). A blank cell is written as its answer in square brackets, e.g. ["Cat", "4", "[8]"]. Every blank must follow from the rest of its row (a rule named in the header such as "Total" or "Double") or from a well-known fact. Optional: up to 3 questions that need the table (compare, total, difference) — never one whose answer is just a blank or a printed cell.
-- shapes: shapeItems, 4–8 items drawn by code: {kind:"fraction", shape: circle|rectangle|bar, parts 2–12, shaded, ask: "name" (write the fraction) | "shade" (student shades it)}, {kind:"count", icon: ${CHART_ICONS.join('|')}, count 1–20}, {kind:"polygon", shape, ask: "sides" | "corners" | "name"}. Use ask "name" only for triangle, pentagon, hexagon, octagon or circle — a square is also a rectangle and a rhombus.
+- shapes: shapeItems, 4–8 items drawn by code: {kind:"fraction", shape: circle|rectangle|bar, parts 2–12, shaded, ask: "name" (write the fraction) | "shade" (student shades it)}, {kind:"count", icon: ${CHART_ICONS.join('|')}, count 1–20}, {kind:"polygon", shape, ask: "sides" | "corners" | "name"} — polygon items only on a page about 2D shapes/geometry, never on a fractions or any other page; there, ask "name" only for triangle, pentagon, hexagon, octagon or circle (a square is also a rectangle and a rhombus).
 - chart: chart + questions (${qMin}–${qMax}). Picture graph (≤${CHART_LIMITS.pictograph.maxCategories} categories, values ≤${CHART_LIMITS.pictograph.maxValue}), bar graph (≤${CHART_LIMITS.bar.maxCategories} bars, values ≤${CHART_LIMITS.bar.maxValue}) or table (≤${CHART_LIMITS.table.maxCategories} rows); whole numbers; icon for picture graphs. Every question is answered by reading the chart. Never pie/line/double-bar graphs. A chart page ALWAYS has its chart object: ${CHART_SHAPE}.
 - activity_art: a colouring page. subject (one simple thing to colour) + instruction (one sentence, e.g. "Colour the picture.") + tasks (0–3 short lines, e.g. "Write the word moon three times."). Use it only when the page description is a colouring or drawing page. Another AI draws the picture and you never see it, so every task must work on ANY picture of the subject: "Colour the biggest thing.", "Write one word about the picture.", "Draw 3 stars around it." Never name a part or detail of the drawing, never give a part its colour ("Colour the cat's collar blue", "Colour the wings of the bee"), never "Draw a hat on the cat", and never count things in the drawing — count only things the task itself states.
 
-Use the suggested layout unless the page description clearly fits another one. Crosswords, word searches, mazes and dot-to-dot are not possible — use matching, fill_blank or labeling on the same content.
+Use the suggested layout unless the page description clearly fits another one. Crosswords, word searches, mazes and dot-to-dot are not possible — use matching, fill_blank or labeling on the same content. No layout draws a number line, clock, ruler, map or grid: such a page becomes questions or fill_blank written in words ("A number line from 0 to 1 is split into fourths. What fraction is at the second mark?"). Word problems use questions.
+title: what the page really prints, ≤6 words — never promise a number line, word problems, models or pictures it does not have. Every page practises something different: never copy another page's items.
 
 THE PICTURE IS DECORATION ONLY. Each page gets one illustration from an AI that cannot count, spell or place details. So:
 - Never refer to the picture/image/illustration/drawing, never ask what is "shown", never ask to count, find, circle or locate something in it, and never ask to colour a specific part or use a specific colour (no "Colour the rings yellow"). Counting is only allowed on shapes items and chart data, which code draws exactly.
@@ -869,6 +1036,12 @@ export function validateHybridPage(norm_, { packageType = 'small', plan = null, 
       // First, so the hint survives the 6-issue feedback cap (specs.js lists every item).
       if (hint) issues.unshift(hint)
     }
+    if (layout === 'shapes' && Array.isArray(spec.items)) {
+      if (spec.items.length < SHAPES_MIN_ITEMS) issues.push(`only ${spec.items.length} shapes items (min ${SHAPES_MIN_ITEMS})`)
+      if (plan && page && spec.items.some(it => it.kind === 'polygon') && !polygonsFitTopic(plan, page)) {
+        issues.unshift('polygon items (name the shape / sides / corners) are off-topic on this page — use fraction or count items that practise the page topic, or another layout')
+      }
+    }
     if (layout === 'multiple_choice' && !spec.questions?.length) issues.push(`the questions list was empty — return ${qMin}–${qMax} multiple-choice questions in "questions", each with its own options (2–4) and the answer letter`)
     else if (layout === 'multiple_choice' && spec.questions.length < minQ) issues.push(`only ${spec.questions.length} questions (min ${minQ})`)
   }
@@ -904,7 +1077,8 @@ const PRINTED_SUBJECT = /\b(?:tables?|charts?|graphs?|worksheets?|numbers?|numer
  * from the spec by layoutAnswerKey. Pure.
  */
 export function hybridPageContent(raw, n) {
-  const title = s(raw.title)
+  // The printed subtitle: never a claim the layout does not deliver (fitPageTitle).
+  const title = fitPageTitle(s(raw.title), n.layout, n.spec)
   // A subject that would make FLUX draw text or data ("a table with numbers") is dropped;
   // pageIllustrationSubject then derives one from the page description.
   const subj = s(raw.illustrationSubject)
@@ -1207,14 +1381,14 @@ export function pagesFromFailedGeneration(fg) {
  * 400 tool_use_failed), null when the answer held none, or { chunkError: { status,
  * code } } when the call failed (generateHybridPages caps 400 retries on it).
  */
-export async function fetchHybridChunk(plan, pages, feedback, stats, { client = groq } = {}) {
+export async function fetchHybridChunk(plan, pages, feedback, stats, { client = groq, suggested = null } = {}) {
   const t0 = Date.now()
   try {
     const res = await callTool(client(), {
       model: MODELS.content,
       maxTokens: HYBRID_MAX_TOKENS,
       tool: hybridContentTool,
-      messages: [{ role: 'user', content: buildHybridContentPrompt(plan, pages, feedback) }],
+      messages: [{ role: 'user', content: buildHybridContentPrompt(plan, pages, feedback, suggested) }],
       label: 'Groq hybrid content',
       step: 'content',
     })
@@ -1280,6 +1454,25 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
 
   const bad400 = new Map() // pageNum → calls that failed with HTTP 400 and recovered nothing
   const gaveUp = [] // pages whose 400 retry also failed: straight to the legacy fallback
+  // Set-wide variety: suggested layouts respect the per-layout cap, and accepted pages
+  // (in acceptance order) are what later pages may not repeat.
+  const suggested = assignLayouts(contentPages)
+  const cap = layoutCap(contentPages.length)
+  const accepted = [] // { pageNum, layout, sigs }
+  const accept = (pageNum, n) => accepted.push({ pageNum, layout: n.layout, sigs: itemSignatures(n) })
+  // Issues a page that is valid on its own still has within the set (duplicate / over cap).
+  const setIssues = (n, attempt) => {
+    const dup = duplicateOf(itemSignatures(n), accepted)
+    if (dup) return [duplicateIssue(dup)]
+    const used = accepted.filter(a => a.layout === n.layout).length
+    // Soft on the last attempt: an over-cap page beats a degraded one.
+    if (!CAP_EXEMPT.has(n.layout) && used >= cap && attempt < HYBRID_MAX_ATTEMPTS) {
+      const counts = new Map()
+      for (const a of accepted) counts.set(a.layout, (counts.get(a.layout) ?? 0) + 1)
+      return [`this set already has ${used} ${n.layout} pages (max ${cap}) — use the ${surplusLayout(counts, cap, n.layout)} layout for this page`]
+    }
+    return []
+  }
 
   for (let attempt = 1; attempt <= HYBRID_MAX_ATTEMPTS && pending.length; attempt++) {
     // Pages whose whole call failed (e.g. 400 tool_use_failed) are retried one per call,
@@ -1287,7 +1480,7 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
     const lost = pending.filter(p => missing.has(p.pageNum))
     const groups = [...chunk(pending.filter(p => !missing.has(p.pageNum)), HYBRID_PAGES_PER_CALL), ...chunk(lost, 1)]
     missing.clear()
-    const results = await mapWithConcurrency(groups, recheckConcurrency(), g => fetchChunk(plan, g, feedback, stats))
+    const results = await mapWithConcurrency(groups, recheckConcurrency(), g => fetchChunk(plan, g, feedback, stats, { suggested }))
     const is400 = (r) => r?.chunkError?.status === 400
     // Every call of the first round failed with 400 and nothing was recovered: Groq is
     // rejecting this plan's calls outright, so retrying page by page only burns tokens.
@@ -1354,9 +1547,13 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
         }
       }
     }
-    for (const { page, raw, n, issues } of checked) {
+    for (const c of checked) {
+      const { page, raw, n } = c
+      if (c.issues.length === 0) c.issues = setIssues(n, attempt)
+      const { issues } = c
       stats?.pages.push({ pageNum: page.pageNum, attempt, layout: n.layout, issues, repairs: n.repairs, raw })
       if (issues.length === 0) {
+        accept(page.pageNum, n)
         done.set(page.pageNum, { content: hybridPageContent(raw, n), repairs: n.repairs })
       } else {
         console.warn(`hybrid content p${page.pageNum} (${n.layout}, attempt ${attempt}/${HYBRID_MAX_ATTEMPTS}): ${issues.join('; ')}`)
@@ -1376,6 +1573,7 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
     if (kept) {
       const n = { ...amb.n, spec: kept }
       if (validateHybridPage(n, opts({ ...page, title: s(amb.raw.title) })).length === 0) {
+        accept(page.pageNum, n)
         done.set(page.pageNum, { content: hybridPageContent(amb.raw, n), repairs: [...n.repairs, `dropped ${amb.offending.length} ambiguous matching pair(s)`] })
         addReviewNote('fallback', `p${page.pageNum}: matching stayed ambiguous after ${HYBRID_MAX_ATTEMPTS} attempts — dropped ${amb.offending.map(i => `"${amb.n.spec.pairs[i].term}"`).join(', ')}; ${kept.pairs.length} pairs remain`)
         continue
@@ -1386,12 +1584,16 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
     // without those tasks (they are optional) rather than lose the colouring page.
     const art = [...tried].reverse().map(t => ({ t, n: repairActivityArt(t) })).find(({ t, n }) => n && validateHybridPage(n, opts({ ...page, title: s(t.raw?.title) })).length === 0)
     if (art) {
+      accept(page.pageNum, art.n)
       done.set(page.pageNum, { content: hybridPageContent(art.t.raw, art.n), repairs: art.n.repairs })
       addReviewNote('fallback', `p${page.pageNum}: activity_art tasks kept naming details of the picture after ${HYBRID_MAX_ATTEMPTS} attempts — ${art.n.repairs.at(-1).replace(/^activity_art: /, '')}`)
       continue
     }
-    const fb = questionsFallback(tried, opts({ ...page, title: s(tried[0]?.raw?.title) }))
+    const fb0 = questionsFallback(tried, opts({ ...page, title: s(tried[0]?.raw?.title) }))
+    // A fallback that repeats an accepted page is no better than the duplicate itself.
+    const fb = fb0 && !duplicateOf(itemSignatures(fb0), accepted) ? fb0 : null
     if (fb) {
+      accept(page.pageNum, fb)
       const raw = tried[0].raw
       done.set(page.pageNum, { content: hybridPageContent({ ...raw, layout: 'questions' }, fb), repairs: [], fallback: 'questions' })
       addReviewNote('fallback', `p${page.pageNum}: ${tried[0].layout ?? 'structured'} content never validated — printed as plain questions instead`)

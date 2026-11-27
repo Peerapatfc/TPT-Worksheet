@@ -197,7 +197,7 @@ describe('generateHybridPages: retry, chunking, fallbacks', () => {
 
   it('a failed call (400) retries its pages one per call', async () => {
     const seen = []
-    const fetchChunk = async (_p, group) => { seen.push(group.map(g => g.pageNum)); return group.length > 1 ? null : group.map(g => ({ ...raw.matching, pageNum: g.pageNum })) }
+    const fetchChunk = async (_p, group) => { seen.push(group.map(g => g.pageNum)); return group.length > 1 ? null : group.map(g => ({ ...raw.matching, pageNum: g.pageNum, pairs: raw.matching.pairs.map(p => ({ ...p, term: `${p.term} ${g.pageNum}` })) })) }
     const { failed } = await generateHybridPages(plan, pages.slice(0, 3), { fetchChunk })
     expect(seen).toEqual([[2, 3, 4], [2], [3], [4]])
     expect(failed).toEqual([])
