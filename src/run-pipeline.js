@@ -11,6 +11,7 @@ import { appendLog } from './lib/logger.js'
 import { getPackageType } from './lib/package-type.js'
 import { costSummary } from './lib/cost-tracker.js'
 import { addReviewNote, reviewNotes, buildReviewMessage } from './lib/review-notes.js'
+import { pageRenderer, isHybridOnly } from './config/renderer.js'
 
 /**
  * Full daily pipeline: history → brainstorm → content → images (+ marketing) →
@@ -32,7 +33,8 @@ async function runSteps() {
   const runDate = new Date().toISOString().split('T')[0]
   const start = Date.now()
   const packageType = getPackageType()
-  appendLog({ step: 'start', status: 'ok', packageType })
+  appendLog({ step: 'start', status: 'ok', packageType, pageRenderer: pageRenderer() })
+  if (isHybridOnly()) console.log('PAGE_RENDERER=hybrid-only: zero-OpenAI run (Groq + FLUX + code-rendered pages; OPENAI_API_KEY not needed)')
 
   await checkGoogleToken()
   appendLog({ step: 'check_google_token', status: 'ok' })
@@ -112,7 +114,10 @@ async function runSteps() {
   // failure (e.g. a network timeout to Telegram) must not fail the run.
   const notes = reviewNotes()
   appendLog({ step: 'review', count: notes.length, notes })
-  const reviewText = buildReviewMessage(plan.setTitle, notes, costSummary().totalUsd)
+  const cost = costSummary()
+  const reviewText = buildReviewMessage(plan.setTitle, notes, cost.totalUsd, undefined, {
+    hybridOnly: isHybridOnly() ? { openaiCalls: cost.openaiCalls, openaiUsd: cost.openaiUsd } : null,
+  })
   try {
     await notifyTelegram(plan, pages[0].buffer, folder.link, reviewText)
     appendLog({ step: 'telegram', status: 'ok' })

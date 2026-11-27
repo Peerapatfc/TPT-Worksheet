@@ -7,8 +7,11 @@ import { recordUsage } from '../lib/cost-tracker.js'
 import { addReviewNote } from '../lib/review-notes.js'
 import { answerKeySvg, renderSvg } from '../lib/svg-templates.js'
 import { chartPageSvg, validateChart } from '../lib/chart-page.js'
-import { useHybridCover, renderHybridCover } from '../lib/hybrid-cover.js'
-import { pageRenderer, renderHybridPage } from '../lib/hybrid-page.js'
+import { useHybridCover, renderHybridCover, renderTextCover } from '../lib/hybrid-cover.js'
+import { renderHybridPage } from '../lib/hybrid-page.js'
+import { isHybridRenderer, isHybridOnly } from '../config/renderer.js'
+import { renderHybridOnlyPage } from '../lib/hybrid-only.js'
+import { hasCloudflareCreds } from '../llm/flux.js'
 import { classifyHybridLayout } from '../lib/layout/classify.js'
 import { validateLayoutSpec } from '../lib/layout/specs.js'
 import { LayoutOverflowError } from '../lib/layout/measure.js'
@@ -48,20 +51,23 @@ export const isChartPage = (page) =>
 
 /**
  * Which renderer draws a page. Answer keys, chart pages and the cover keep their
- * own renderers; worksheet/activity pages go to the hybrid layout engine only with
- * PAGE_RENDERER=hybrid AND a P1 layout that fits their content — everything else
- * stays on gpt-image-2 ('legacy'). Pure apart from an unknown-flag warning.
- * @returns {{ route: 'answer_key'|'chart'|'cover'|'hybrid'|'legacy', layout?: string, wordBank?: string[], reason?: string }}
+ * own renderers; worksheet/activity pages go to the hybrid layout engine with
+ * PAGE_RENDERER=hybrid AND a layout that fits their content — everything else
+ * stays on gpt-image-2 ('legacy'). With PAGE_RENDERER=hybrid-only no page is ever
+ * 'legacy': a page with no layout routes to 'hybrid' with layout null (+ reason) and
+ * the hybrid-only fallbacks (src/lib/hybrid-only.js) draw it. Pure.
+ * @returns {{ route: 'answer_key'|'chart'|'cover'|'hybrid'|'legacy', layout?: string|null, wordBank?: string[], spec?: object, reason?: string }}
  */
 export function routePage(page, env = process.env) {
   if (page.type === 'answer_key') return { route: 'answer_key' }
   if (isChartPage(page)) return { route: 'chart' }
   if (page.type === 'cover') return { route: 'cover' }
-  if (pageRenderer(env) !== 'hybrid') return { route: 'legacy' }
+  if (!isHybridRenderer(env)) return { route: 'legacy' }
   const own = structuredRoute(page)
   if (own) return own
   const c = classifyHybridLayout(page)
-  return c.layout ? { route: 'hybrid', ...c } : { route: 'legacy', reason: c.reason }
+  if (c.layout) return { route: 'hybrid', ...c }
+  return isHybridOnly(env) ? { route: 'hybrid', layout: null, reason: c.reason } : { route: 'legacy', reason: c.reason }
 }
 
 /**
@@ -90,6 +96,12 @@ export async function generateWorksheetPage(plan, page, {
   legacy = generateOnePage,
 } = {}) {
   const r = routePage(page, env)
+  // Zero-OpenAI mode: code fallbacks only — the legacy renderer is never reached.
+  if (isHybridOnly(env)) {
+    const out = await renderHybridOnlyPage(plan, page, r, { illustrations, hybrid })
+    console.log(`Rendered hybrid-only page ${page.pageNum}/${plan.pageCount}: ${page.filename} (${out.meta?.layout ?? '?'}, ${out.meta?.size ?? '?'}px, art ${out.meta?.art ?? '?'})`)
+    return { ...out.page, buffer: out.buffer }
+  }
   if (r.route === 'hybrid') {
     try {
       const { buffer, meta } = await hybrid(plan, page, { layout: r.layout, wordBank: r.wordBank, spec: r.spec, illustrations })
@@ -111,13 +123,17 @@ export async function generateWorksheetPage(plan, page, {
 
 export async function generatePages(plan, { env = process.env } = {}) {
   const concurrency = parseInt(env.PAGE_CONCURRENCY ?? '1', 10) || 1
-  const illustrations = pageRenderer(env) === 'hybrid'
+  const illustrations = isHybridRenderer(env)
     ? createIllustrationProvider({ concurrency: readConcurrency(env, 'ILLUSTRATION_CONCURRENCY', 2) })
     : null
   const aiPages = plan.pages.filter(p => p.type !== 'answer_key' && !isChartPage(p))
   const generated = await mapWithConcurrency(aiPages, concurrency, page =>
-    page.type === 'cover' ? generateCoverPage(plan, page) : generateWorksheetPage(plan, page, { env, illustrations }))
+    page.type === 'cover' ? generateCoverPage(plan, page, { env }) : generateWorksheetPage(plan, page, { env, illustrations }))
 
+  // Answer keys print the content each page actually printed (hybrid-only may have
+  // dropped, converted or trimmed questions to fit).
+  const printed = new Map(generated.map(p => [p.pageNum, p]))
+  const keyPlan = { ...plan, pages: plan.pages.map(p => (printed.has(p.pageNum) ? { ...p, content: printed.get(p.pageNum).content } : p)) }
   let next = 0
   return Promise.all(plan.pages.map(async page => {
     if (isChartPage(page)) {
@@ -126,7 +142,7 @@ export async function generatePages(plan, { env = process.env } = {}) {
       return { ...page, buffer }
     }
     if (page.type !== 'answer_key') return generated[next++]
-    const buffer = await renderSvg(answerKeySvg(plan, page))
+    const buffer = await renderSvg(answerKeySvg(keyPlan, page))
     console.log(`Rendered answer key page ${page.pageNum}/${plan.pageCount}: ${page.filename}`)
     return { ...page, buffer }
   }))
@@ -136,13 +152,34 @@ export async function generatePages(plan, { env = process.env } = {}) {
  * Cover page. With COVER_RENDERER=hybrid and Cloudflare credentials, FLUX draws the
  * illustration and code draws the text (no validate/reconcile: the text is exact and
  * a cover has no questions). Fail-open: any hybrid error falls back to the
- * gpt-image-2 path with a review note. Deps are injectable for tests.
+ * gpt-image-2 path with a review note. With PAGE_RENDERER=hybrid-only the FLUX cover
+ * is used whenever Cloudflare credentials exist, and the fallback is the code-drawn
+ * text-only cover (theme motifs in the art slot) — never gpt-image-2.
+ * Deps are injectable for tests.
  */
 export async function generateCoverPage(plan, page, {
   env = process.env,
   hybrid = renderHybridCover,
+  textOnly = renderTextCover,
   legacy = generateOnePage,
 } = {}) {
+  if (isHybridOnly(env)) {
+    if (hasCloudflareCreds(env) || hybrid !== renderHybridCover) {
+      try {
+        const buffer = await hybrid(plan)
+        console.log(`Rendered hybrid cover page ${page.pageNum}/${plan.pageCount}: ${page.filename} (FLUX + template)`)
+        return { ...page, buffer }
+      } catch (err) {
+        console.warn(`Hybrid cover failed (${err.message}) — text-only cover (hybrid-only)`)
+        addReviewNote('fallback', `Hybrid cover failed (${err.message}); code-drawn text-only cover used (hybrid-only, no gpt-image-2)`)
+      }
+    } else {
+      addReviewNote('fallback', 'No Cloudflare credentials: code-drawn text-only cover used (hybrid-only, no gpt-image-2)')
+    }
+    const buffer = await textOnly(plan)
+    console.log(`Rendered text-only cover page ${page.pageNum}/${plan.pageCount}: ${page.filename} (template + motifs)`)
+    return { ...page, buffer }
+  }
   if (useHybridCover(env)) {
     try {
       const buffer = await hybrid(plan)

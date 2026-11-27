@@ -16,6 +16,7 @@ import { groq } from '../llm/clients.js'
 import { callTool } from '../llm/tool-call.js'
 import { MODELS } from '../config/constants.js'
 import { addReviewNote } from '../lib/review-notes.js'
+import { isHybridOnly } from '../config/renderer.js'
 import { validateLayoutSpec, layoutAnswerKey, matchingOrder, LIMITS, POLYGONS, FRACTION_SHAPES, LETTERS, mcAnswerIndex } from '../lib/layout/specs.js'
 import { cleanText, LayoutOverflowError } from '../lib/layout/measure.js'
 import { renderLayout } from '../lib/layout/index.js'
@@ -1628,7 +1629,7 @@ export async function generateHybridContent(plan, contentPages, { fetchChunk, so
   if (failed.length) {
     const nums = failed.map(p => p.pageNum).join(', ')
     console.warn(`hybrid content: page(s) ${nums} never produced a valid layout — using the legacy content prompt`)
-    addReviewNote('fallback', `p${nums}: no valid hybrid layout after ${HYBRID_MAX_ATTEMPTS} attempts — legacy content used (P1 classifier or gpt-image-2 draws the page)`)
+    addReviewNote('fallback', `p${nums}: no valid hybrid layout after ${HYBRID_MAX_ATTEMPTS} attempts — legacy content used (${isHybridOnly() ? 'drawn by the hybrid-only code fallbacks' : 'P1 classifier or gpt-image-2 draws the page'})`)
     const legacyPages = legacy ? await legacy(plan, failed) : []
     for (const lp of legacyPages ?? []) { const { pageNum, ...content } = lp; out.set(pageNum, content) }
   }

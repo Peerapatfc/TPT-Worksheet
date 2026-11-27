@@ -235,26 +235,96 @@ export function fitCoverTitle(title, maxWidth, { max = 96, min = 44, maxLines = 
 const sparkle = (x, y, r, fill) =>
   `<path d="M${x} ${y - r} Q${x + r * 0.18} ${y - r * 0.18} ${x + r} ${y} Q${x + r * 0.18} ${y + r * 0.18} ${x} ${y + r} Q${x - r * 0.18} ${y + r * 0.18} ${x - r} ${y} Q${x - r * 0.18} ${y - r * 0.18} ${x} ${y - r} Z" fill="${fill}"/>`
 
-const cornerDots = (color, accent) => {
+const cornerDots = (color, accent, W = PAGE_W, H = PAGE_H) => {
   const one = `${sparkle(78, 92, 26, color)}${sparkle(130, 66, 13, accent)}${`<circle cx="66" cy="150" r="9" fill="${accent}"/>`}${`<circle cx="150" cy="118" r="6" fill="${color}" opacity=".6"/>`}`
   return [
     `<g>${one}</g>`,
-    `<g transform="translate(${PAGE_W} 0) scale(-1 1)">${one}</g>`,
-    `<g transform="translate(0 ${PAGE_H}) scale(1 -1)">${one}</g>`,
-    `<g transform="translate(${PAGE_W} ${PAGE_H}) scale(-1 -1)">${one}</g>`,
+    `<g transform="translate(${W} 0) scale(-1 1)">${one}</g>`,
+    `<g transform="translate(0 ${H}) scale(1 -1)">${one}</g>`,
+    `<g transform="translate(${W} ${H}) scale(-1 -1)">${one}</g>`,
   ].join('')
+}
+
+/**
+ * Art for a cover slot: the illustration aspect-fit and centred on a soft disc; else
+ * `decor(slot)` (code-drawn motifs); else just the soft disc. Pure.
+ */
+function artInSlot(slot, illustration, soft, decor) {
+  const cx = slot.x + slot.w / 2
+  if (illustration?.href && illustration.width > 0 && illustration.height > 0) {
+    const scale = Math.min(slot.w / illustration.width, slot.h / illustration.height)
+    const w = Math.round(illustration.width * scale)
+    const h = Math.round(illustration.height * scale)
+    const ix = Math.round(cx - w / 2)
+    const iy = Math.round(slot.y + (slot.h - h) / 2)
+    return `<ellipse cx="${cx}" cy="${iy + h / 2}" rx="${w / 2 + 24}" ry="${h / 2}" fill="${soft}" opacity=".55"/>` +
+      `<image x="${ix}" y="${iy}" width="${w}" height="${h}" href="${escapeXml(illustration.href)}"/>`
+  }
+  if (decor) return decor(slot)
+  return `<ellipse cx="${cx}" cy="${slot.y + slot.h / 2}" rx="${slot.w / 2 + 20}" ry="${slot.h / 2}" fill="${soft}" opacity=".55"/>`
+}
+
+/**
+ * Square marketing cover (1024×1024) drawn by code — the zero-OpenAI replacement for
+ * the gpt-image-2 marketing cover: title, "grade | subject" line, the cover
+ * illustration (or `decor(slot)` motifs) and a theme-colour banner
+ * "No Prep Printable • Answer Key Included". All text is XML-escaped. Pure.
+ *
+ * @param {{ title: string, subtitle?: string, color?: string,
+ *   illustration?: { href: string, width: number, height: number } | null,
+ *   decor?: ((slot: { x: number, y: number, w: number, h: number }) => string) | null,
+ *   banner?: string }} opts
+ */
+export function marketingCoverSvg({ title, subtitle, color, illustration = null, decor = null, banner = 'No Prep Printable • Answer Key Included' }) {
+  const c = safeColor(color)
+  const bg = tint(c, 0.92)
+  const soft = tint(c, 0.8)
+  const accent = tint(c, 0.45)
+  const margin = 80
+  const innerW = SLIDE - margin * 2
+  const bannerH = 130
+  const bannerY = SLIDE - 16 - bannerH
+
+  const { size, lines } = fitCoverTitle(title, innerW, { max: 80, min: 40, maxLines: 2 })
+  const lineH = size * 1.1
+  const firstBase = 64 + size
+  const titleSvg = lines.map((l, i) => text(SLIDE / 2, firstBase + i * lineH, l, { size, weight: 'bold', fill: c, anchor: 'middle' })).join('')
+  let y = firstBase + (lines.length - 1) * lineH
+  let subSvg = ''
+  if (subtitle) {
+    const subSize = fitFontSize([subtitle], innerW, 34, 22)
+    y += 54
+    subSvg = text(SLIDE / 2, y, wrapText(subtitle, innerW, subSize)[0], { size: subSize, fill: '#555', anchor: 'middle', style: 'italic' })
+  }
+  const slot = { x: margin, y: y + 30, w: innerW, h: Math.max(160, bannerY - 26 - (y + 30)) }
+  const art = artInSlot(slot, illustration, soft, decor)
+  const bannerSize = fitFontSize([banner], SLIDE - 120, 40, 24)
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${SLIDE}" height="${SLIDE}" viewBox="0 0 ${SLIDE} ${SLIDE}">
+<rect width="100%" height="100%" fill="${bg}"/>
+<rect x="16" y="16" width="${SLIDE - 32}" height="${SLIDE - 32}" rx="34" fill="#fff" stroke="${c}" stroke-width="12"/>
+<rect x="30" y="30" width="${SLIDE - 60}" height="${SLIDE - 60}" rx="24" fill="none" stroke="${accent}" stroke-width="3" stroke-dasharray="3 12" stroke-linecap="round"/>
+${cornerDots(c, accent, SLIDE, SLIDE)}
+${art}
+${titleSvg}
+${subSvg}
+<path d="M16 ${bannerY} H${SLIDE - 16} V${SLIDE - 50} Q${SLIDE - 16} ${SLIDE - 16} ${SLIDE - 50} ${SLIDE - 16} H50 Q16 ${SLIDE - 16} 16 ${SLIDE - 50} Z" fill="${c}"/>
+${text(SLIDE / 2, bannerY + bannerH / 2 + bannerSize * 0.36, banner, { size: bannerSize, weight: 'bold', fill: '#fff', anchor: 'middle' })}
+</svg>`
 }
 
 /**
  * Hybrid cover page (1024×1536): code-drawn frame, title, subtitle, name line and
  * grade/page-count pill around an AI illustration (`illustration.href` is a PNG data
  * URI with transparent background; it is aspect-fit into the free area). Without an
- * illustration the slot is left as a soft tinted panel. All text is XML-escaped. Pure.
+ * illustration the slot is left as a soft tinted panel, or filled by `decor(slot)`
+ * (code-drawn motifs for the zero-OpenAI text-only cover). All text is XML-escaped. Pure.
  *
  * @param {{ title: string, subtitle?: string, gradeLabel?: string, pageCount?: number,
- *   color?: string, illustration?: { href: string, width: number, height: number } | null }} opts
+ *   color?: string, illustration?: { href: string, width: number, height: number } | null,
+ *   decor?: ((slot: { x: number, y: number, w: number, h: number }) => string) | null }} opts
  */
-export function hybridCoverSvg({ title, subtitle, gradeLabel, pageCount, color, illustration = null }) {
+export function hybridCoverSvg({ title, subtitle, gradeLabel, pageCount, color, illustration = null, decor = null }) {
   const c = safeColor(color)
   const bg = tint(c, 0.92)
   const soft = tint(c, 0.8)
@@ -279,16 +349,7 @@ export function hybridCoverSvg({ title, subtitle, gradeLabel, pageCount, color, 
   const nameY = pillY - 46
   const slot = { x: COVER_MARGIN, y: y + 44, w: innerW, h: Math.max(200, nameY - 60 - (y + 44)) }
 
-  let art = `<ellipse cx="${PAGE_W / 2}" cy="${slot.y + slot.h / 2}" rx="${slot.w / 2 + 20}" ry="${slot.h / 2}" fill="${soft}" opacity=".55"/>`
-  if (illustration?.href && illustration.width > 0 && illustration.height > 0) {
-    const scale = Math.min(slot.w / illustration.width, slot.h / illustration.height)
-    const w = Math.round(illustration.width * scale)
-    const h = Math.round(illustration.height * scale)
-    const ix = Math.round(PAGE_W / 2 - w / 2)
-    const iy = Math.round(slot.y + (slot.h - h) / 2)
-    art = `<ellipse cx="${PAGE_W / 2}" cy="${iy + h / 2}" rx="${w / 2 + 24}" ry="${h / 2}" fill="${soft}" opacity=".55"/>` +
-      `<image x="${ix}" y="${iy}" width="${w}" height="${h}" href="${escapeXml(illustration.href)}"/>`
-  }
+  const art = artInSlot(slot, illustration, soft, decor)
 
   const pillText = [gradeLabel, pageCount ? `${pageCount} Printable Pages` : null].filter(Boolean).join(' | ')
   const pillSize = fitFontSize([pillText], 560, 36, 22)

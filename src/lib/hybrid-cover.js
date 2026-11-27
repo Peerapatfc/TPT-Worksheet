@@ -3,7 +3,9 @@
 // (svg-templates.js hybridCoverSvg) so cover text is always spelled exactly.
 import sharp from 'sharp'
 import { generateIllustration, hasCloudflareCreds } from '../llm/flux.js'
-import { hybridCoverSvg, renderSvg } from './svg-templates.js'
+import { hybridCoverSvg, marketingCoverSvg, renderSvg } from './svg-templates.js'
+import { motifBlock, themeMotif, palette } from './layout/decor.js'
+import { addReviewNote } from './review-notes.js'
 
 export const ILLUSTRATION_STYLE = "cute flat-color children's book illustration, bright colors, clean outlines, white background, vignette composition centered on white"
 const NO_TEXT = 'no text, no letters, no numbers'
@@ -114,20 +116,77 @@ export async function prepareIllustration(raw) {
   return { png, width: out.width, height: out.height }
 }
 
+// One cover illustration per plan object and generator: the cover page and the
+// hybrid-only marketing cover (run in parallel) share a single FLUX call; a
+// failure is shared too, so a broken prompt costs one call.
+const coverArt = new WeakMap()
+
+/**
+ * The plan's prepared cover illustration ({ href, width, height }), generated once
+ * per plan + generator. Rejects on any FLUX/compositing failure.
+ */
+export function coverIllustration(plan, { generate = generateIllustration } = {}) {
+  const hit = coverArt.get(plan)
+  if (hit?.generate === generate) return hit.promise
+  const promise = (async () => {
+    const ill = await prepareIllustration(await generate(buildIllustrationPrompt(plan)))
+    return { href: `data:image/png;base64,${ill.png.toString('base64')}`, width: ill.width, height: ill.height }
+  })()
+  coverArt.set(plan, { generate, promise })
+  return promise
+}
+
+const coverOpts = (plan) => ({
+  title: plan.setTitle,
+  subtitle: coverSubtitle(plan),
+  gradeLabel: plan.gradeLevel,
+  pageCount: plan.pageCount,
+  color: plan.themeColor,
+})
+
+/** Code-drawn theme motifs filling an illustration slot (no-illustration covers). Pure. */
+export const motifDecor = (plan) => (slot) => {
+  const side = Math.min(slot.w, slot.h)
+  return motifBlock(themeMotif(plan), slot.x + (slot.w - side * 1.2) / 2, slot.y + (slot.h - side) / 2, side * 1.2, side, palette(plan.themeColor))
+}
+
 /**
  * Render the cover page PNG (1024×1536). `generate` is injectable for tests.
- * Throws on any FLUX/compositing failure — the caller falls back to gpt-image-2.
+ * Throws on any FLUX/compositing failure — the caller falls back (gpt-image-2, or
+ * the text-only cover in PAGE_RENDERER=hybrid-only).
  */
 export async function renderHybridCover(plan, { generate = generateIllustration } = {}) {
-  const raw = await generate(buildIllustrationPrompt(plan))
-  const ill = await prepareIllustration(raw)
-  const svg = hybridCoverSvg({
-    title: plan.setTitle,
-    subtitle: coverSubtitle(plan),
-    gradeLabel: plan.gradeLevel,
-    pageCount: plan.pageCount,
-    color: plan.themeColor,
-    illustration: { href: `data:image/png;base64,${ill.png.toString('base64')}`, width: ill.width, height: ill.height },
-  })
-  return renderSvg(svg)
+  const illustration = await coverIllustration(plan, { generate })
+  return renderSvg(hybridCoverSvg({ ...coverOpts(plan), illustration }))
+}
+
+/**
+ * Text-only cover (PAGE_RENDERER=hybrid-only fallback when FLUX is unavailable or
+ * fails): the same code-drawn frame, title, subtitle, name line and pill, with theme
+ * motifs in the illustration slot. Pure code — never throws for valid plan text.
+ */
+export const renderTextCover = (plan) => renderSvg(hybridCoverSvg({ ...coverOpts(plan), decor: motifDecor(plan) }))
+
+/**
+ * Square marketing cover (1024×1024) for PAGE_RENDERER=hybrid-only: code-drawn title,
+ * grade/subject line and banner around the set's cover illustration (shared FLUX
+ * call, see coverIllustration). Without Cloudflare credentials, or if FLUX fails,
+ * it is drawn with theme motifs instead and a `fallback` review note is recorded.
+ * Never calls OpenAI. Deps injectable for tests.
+ * @returns {Promise<{ buffer: Buffer, illustrated: boolean }>}
+ */
+export async function renderMarketingCover(plan, { env = process.env, generate = generateIllustration } = {}) {
+  const topic = String(plan.tptListing?.title ?? plan.setTitle ?? '').split('|')[0].trim() || plan.setTitle
+  const base = { title: topic, subtitle: [plan.gradeLevel, plan.subject].filter(Boolean).join(' | '), color: plan.themeColor }
+  let illustration = null
+  if (hasCloudflareCreds(env) || generate !== generateIllustration) {
+    try {
+      illustration = await coverIllustration(plan, { generate })
+    } catch (err) {
+      console.warn(`Marketing cover illustration failed (${err.message}) — drawing theme motifs instead`)
+      addReviewNote('fallback', `Marketing cover illustration failed (${err.message}); drawn with theme motifs`)
+    }
+  }
+  const buffer = await renderSvg(marketingCoverSvg({ ...base, illustration, decor: motifDecor(plan) }))
+  return { buffer, illustrated: !!illustration }
 }

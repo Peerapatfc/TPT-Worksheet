@@ -4,7 +4,7 @@
 // notification and logged at the end of the run.
 const notes = []
 
-/** @param {'qa_failed'|'question_rewritten'|'answer_corrected'|'answer_leak'|'fallback'|'image_spec_updated'|'spec_mismatch'} kind */
+/** @param {'qa_failed'|'overflow'|'degraded'|'question_rewritten'|'answer_corrected'|'answer_leak'|'fallback'|'image_spec_updated'|'spec_mismatch'} kind */
 export function addReviewNote(kind, message) {
   notes.push({ kind, message })
 }
@@ -20,6 +20,8 @@ export function resetReviewNotes() {
 
 const SECTIONS = [
   ['qa_failed', '⚠️ Pages that failed QA after all retries — check these first'],
+  ['degraded', '⚠️ Pages simplified by the zero-OpenAI renderer — check these questions/answers'],
+  ['overflow', '📏 Pages shrunk or trimmed to fit (hybrid-only overflow fallback)'],
   ['spec_mismatch', '⚠️ Recheck rewrites reverted — the picture would not match; verify these answers'],
   ['fallback', '⚠️ Steps that fell back'],
   ['question_rewritten', '✏️ Questions rewritten by the recheck'],
@@ -31,11 +33,16 @@ const SECTIONS = [
 /**
  * Plain-text review summary for Telegram (sent without parse_mode, so no
  * escaping). Truncated to stay under Telegram's 4096-char message limit.
+ * `hybridOnly` ({ openaiCalls, openaiUsd }) adds the zero-OpenAI line and shows the
+ * Groq figure as a paid-rate estimate (the free tier bills $0).
  * Pure — exported for unit testing.
  */
-export function buildReviewMessage(setTitle, notesList, totalUsd, maxLength = 4000) {
+export function buildReviewMessage(setTitle, notesList, totalUsd, maxLength = 4000, { hybridOnly = null } = {}) {
   const lines = [`🔍 Review: ${setTitle}`]
-  if (typeof totalUsd === 'number') lines.push(`💵 API cost: $${totalUsd.toFixed(2)}`)
+  if (hybridOnly) {
+    lines.push(`🆓 Hybrid-only run (PAGE_RENDERER=hybrid-only): ${hybridOnly.openaiCalls ?? 0} OpenAI calls, OpenAI cost $${(hybridOnly.openaiUsd ?? 0).toFixed(2)}`)
+    if (typeof totalUsd === 'number') lines.push(`💵 API cost: $0.00 on free tiers (Groq paid-rate estimate $${totalUsd.toFixed(2)})`)
+  } else if (typeof totalUsd === 'number') lines.push(`💵 API cost: $${totalUsd.toFixed(2)}`)
   if (notesList.length === 0) {
     lines.push('', '✅ Nothing flagged — spot-check as usual.')
   }

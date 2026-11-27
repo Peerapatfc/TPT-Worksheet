@@ -7,6 +7,8 @@ import { withRetry } from '../llm/with-retry.js'
 import { MODELS, IMAGE_SIZE } from '../config/constants.js'
 import { recordUsage } from '../lib/cost-tracker.js'
 import { whatsIncludedSvg, benefitsSvg, renderSvg } from '../lib/svg-templates.js'
+import { renderMarketingCover } from '../lib/hybrid-cover.js'
+import { isHybridOnly } from '../config/renderer.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // src/steps/generate-marketing-slides.js -> repo-root/logo.png
@@ -58,7 +60,14 @@ export function buildMarketingCoverPrompt(plan) {
   return `Square 1:1 professional marketing cover graphic for a Teachers Pay Teachers educational resource. White or very light background. Large bold centered title text: "${topicName}". Smaller text below: "${plan.gradeLevel} | ${plan.subject}". Bottom banner in color ${plan.themeColor} with white text: "No Prep Printable • Answer Key Included". Colorful child-friendly illustration related to "${plan.subject}" and "${plan.setTitle}" filling upper area.${subjects} Clean modern educator product design. No worksheet lines, no questions, no writing spaces.`
 }
 
-export async function generateMarketingSlides(plan) {
+/**
+ * Cover + "What's Included" + "Benefits" slides, each with the logo composited.
+ * The two text slides are template-rendered. The cover is gpt-image-2, except with
+ * PAGE_RENDERER=hybrid-only, where it is code + the set's FLUX cover illustration
+ * (theme motifs if FLUX is unavailable) and nothing calls OpenAI.
+ * Deps injectable for tests: env, generate (FLUX), image (OpenAI slide).
+ */
+export async function generateMarketingSlides(plan, { env = process.env, generate, image = generateSlide } = {}) {
   const worksheetPages = plan.pages.filter(p => p.type === 'worksheet' || p.type === 'activity')
   const answerKeyPages = plan.pages.filter(p => p.type === 'answer_key')
   const totalQuestions = worksheetPages.reduce((sum, p) => sum + (p.content?.questions?.length ?? 0), 0)
@@ -72,12 +81,13 @@ export async function generateMarketingSlides(plan) {
 
   const color = plan.themeColor
 
-  const coverPrompt = buildMarketingCoverPrompt(plan)
-
-  console.log('Generating marketing slides...')
+  const hybridOnly = isHybridOnly(env)
+  console.log(`Generating marketing slides${hybridOnly ? ' (hybrid-only: code + FLUX cover)' : ''}...`)
   // Only the cover needs an illustration; the two text slides are template-rendered.
   const [coverRaw, whatsIncludedRaw, benefitsRaw] = await Promise.all([
-    generateSlide(coverPrompt, 'medium'),
+    hybridOnly
+      ? renderMarketingCover(plan, { env, ...(generate ? { generate } : {}) }).then(r => r.buffer)
+      : image(buildMarketingCoverPrompt(plan), 'medium'),
     renderSvg(whatsIncludedSvg({
       color,
       worksheetCount: worksheetPages.length,
