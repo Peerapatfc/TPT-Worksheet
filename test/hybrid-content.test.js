@@ -56,7 +56,7 @@ describe('layout hint + prompt + schema (hybrid only)', () => {
     expect(p).not.toMatch(/imageSpec/)
     const props = hybridContentTool.function.parameters.properties.pages.items.properties
     expect(props.imageSpec).toBeUndefined()
-    expect(hybridContentTool.function.parameters.properties.pages.items.required).toEqual(['title', 'layout']) // pageNum optional (matchRawPages)
+    expect(hybridContentTool.function.parameters.properties.pages.items.required).toBeUndefined() // title/layout/pageNum defaulted by matchRawPages
     for (const k of ['questions', 'pairs', 'chart', 'shapeItems', 'illustrationSubject']) {
       expect(props[k].anyOf.map(a => a.type)).toEqual(expect.arrayContaining(['null', 'string']))
     }

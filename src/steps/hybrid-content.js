@@ -76,8 +76,10 @@ export const hybridContentTool = {
               // Optional: a page without pageNum failed the whole call (400 tool_use_failed);
               // matchRawPages pairs it with its planned page by position.
               pageNum: itemNum,
-              title: { type: 'string' },
-              layout: { type: 'string', enum: HYBRID_LAYOUTS },
+              title: orNull({ type: 'string' }),
+              // Described, not enforced: an unknown layout must not fail the whole call;
+              // matchRawPages infers it from the fields instead.
+              layout: orNull({ type: 'string', enum: HYBRID_LAYOUTS }),
               illustrationSubject: orNull({ type: 'string', description: 'decorative picture: concrete noun phrase, max 8 words, no text' }),
               questions: orNull({
                 type: 'array',
@@ -161,11 +163,12 @@ export const hybridContentTool = {
                 // validateChart checks chart pages.
               }),
             },
-            required: ['title', 'layout'],
+            // No required keys: gpt-oss omitted title/layout (and sometimes `pages`
+            // itself), and Groq then rejected the whole call (400 tool_use_failed).
+            // coercePages / matchRawPages default the title and infer the layout.
           },
         },
       },
-      required: ['pages'],
     },
   },
 }
@@ -192,6 +195,10 @@ export function suggestLayout(page) {
 // ── Prompt ───────────────────────────────────────────────────────────────────
 // The exact chart shape, used by the prompt and by the "chart missing" retry hint.
 const CHART_SHAPE = `"chart": {"type": "pictograph" | "bar" | "table", "title": "…", "icon": "${CHART_ICONS.join('" | "')}" (pictograph only), "categories": [{"label": "Apples", "value": 4}, {"label": "Pears", "value": 2}]} — 2+ categories, whole-number values (pictograph ≤${CHART_LIMITS.pictograph.maxCategories} categories and ≤${CHART_LIMITS.pictograph.maxValue}, bar ≤${CHART_LIMITS.bar.maxCategories} and ≤${CHART_LIMITS.bar.maxValue}, table ≤${CHART_LIMITS.table.maxCategories} rows)`
+
+// The exact call shape: last line of the prompt, and the retry hint for a page whose
+// call came back unparseable (bare array, flat page, 400 tool_use_failed).
+export const EXPECTED_SHAPE = 'Call generate_layout_content with {"pages":[{"pageNum":<n>,"title":"<short page title>","layout":"<one layout>", ...that layout\'s fields}]} — one entry per page above.'
 
 export function questionRange(packageType) {
   return packageType === 'free' ? [4, 5] : packageType === 'large' ? [5, 8] : [4, 6]
@@ -241,7 +248,7 @@ Content rules:
 Pages:
 ${pageList}
 
-Call generate_layout_content with one entry per page above.`
+${EXPECTED_SHAPE}`
 }
 
 // ── Normalize + repair + validate ────────────────────────────────────────────
@@ -266,6 +273,69 @@ export const toList = (v) => {
   return keys.sort((a, b) => keyRank(a) - keyRank(b)).map(k => v[k])
 }
 const arr = (v) => toList(v).filter(has)
+
+// Fields that only a page object carries (used to recognise a flat single page).
+const PAGE_KEYS = ['pageNum', 'title', 'layout', 'questions', 'sentences', 'wordBank', 'pairs', 'categories', 'sortItems', 'labels', 'columns', 'rows', 'shapeItems', 'instruction', 'tasks', 'chart', 'subject', 'illustrationSubject']
+const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v)
+const looksLikePage = (v) => isObj(v) && PAGE_KEYS.some(k => has(v[k]))
+
+/**
+ * The raw pages of a generate_layout_content answer, whatever its shape: a JSON
+ * string, a bare array of pages, {pages: [...]} or {pages: {"1": {...}}} (toList), a
+ * {name, arguments} wrapper (Groq failed_generation), or one flat page object.
+ * Anything else → []. Pure.
+ */
+export function coercePages(args) {
+  if (typeof args === 'string') {
+    if (!/^\s*[[{]/.test(args)) return []
+    try { return coercePages(JSON.parse(args)) } catch { return [] }
+  }
+  if (Array.isArray(args)) return args.flatMap(x => (isObj(x) && has(x.pages) && !looksLikePage({ ...x, pages: undefined }) ? coercePages(x.pages) : isObj(x) ? [x] : []))
+  if (!isObj(args)) return []
+  if (has(args.pages)) {
+    if (isObj(args.pages) && looksLikePage(args.pages)) return [args.pages]
+    return toList(args.pages).flatMap(x => (isObj(x) ? [x] : []))
+  }
+  if (has(args.arguments)) return coercePages(args.arguments)
+  if (looksLikePage(args)) return [args]
+  return toList(args).filter(isObj)
+}
+
+const filled = (v) => toList(v).filter(has).length > 0
+const hasText = (v) => typeof v === 'string' && v.trim() !== ''
+
+/**
+ * The layout a raw page's fields imply, for a page that names none (or an unknown
+ * one); else the plan's keyword hint (suggestLayout). Pure.
+ */
+export function inferLayout(raw, page = null) {
+  const hint = suggestLayout(page)
+  if (!isObj(raw)) return hint
+  const c = raw.chart
+  if (isObj(c) && (filled(c.categories) || hasText(c.type))) return 'chart'
+  if (filled(raw.pairs)) return 'matching'
+  if (filled(raw.sortItems)) return 'sorting'
+  if (filled(raw.labels)) return 'labeling'
+  if (filled(raw.sentences)) return 'fill_blank'
+  if (filled(raw.rows)) return 'table_fill'
+  if (filled(raw.shapeItems)) return 'shapes'
+  if (hasText(raw.instruction) || filled(raw.tasks)) return 'activity_art'
+  if (filled(raw.categories)) return hint === 'chart' ? 'chart' : 'sorting'
+  const qs = arr(raw.questions)
+  if (qs.length) {
+    if (qs.some(q => isObj(q) && filled(q.options))) return 'multiple_choice'
+    // A chart page that came back without its chart stays a chart page, so the
+    // validator asks for the chart instead of shipping questions about a missing graph.
+    return hint === 'chart' ? 'chart' : 'questions'
+  }
+  return hint
+}
+
+/** A printable title from the plan page ("plant-life-cycle" → "Plant Life Cycle"). Pure. */
+export function titleFromPage(page) {
+  const words = String(page?.filename ?? '').replace(/\.(png|pdf)$/i, '').replace(/^\d+[-_\s]*/, '').split(/[-_\s]+/).filter(Boolean)
+  return words.length ? words.map(w => w[0].toUpperCase() + w.slice(1)).join(' ') : `Page ${page?.pageNum ?? ''}`.trim()
+}
 const dedupeBy = (list, key) => { const seen = new Set(); return list.filter(x => { const k = key(x); if (!k || seen.has(k)) return false; seen.add(k); return true }) }
 const BLANK_RE = /_{2,}/
 // Sort items left after dropping over-long ones (the prompt asks for 6–12).
@@ -612,6 +682,7 @@ const parseCell = (c) => {
 export function normalizeHybridPage(raw) {
   const repairs = []
   const layout = HYBRID_LAYOUTS.includes(raw?.layout) ? raw.layout : null
+  if (layout && raw?.layoutInferred) repairs.push(`layout missing or unknown in the answer — inferred ${layout} from its fields`)
   const qs = arr(raw?.questions).map((q, i) => ({
     num: i + 1,
     question: s(q.question),
@@ -1114,11 +1185,31 @@ async function replacePairs({ plan, c, kept, dropped, valid, fetchReplacements, 
 }
 
 // ── Groq calls ───────────────────────────────────────────────────────────────
-/** Ask Groq for a chunk of pages. Returns raw pages[] or null on failure. */
-async function fetchHybridChunk(plan, pages, feedback, stats) {
+/**
+ * The raw pages inside a Groq 400 tool_use_failed `failed_generation` — usually
+ * `{"name": "generate_layout_content", "arguments": [ ...pages ]}` (a bare array, which
+ * the schema rejects). Falls back to the text after `"arguments":` when the wrapper
+ * itself does not parse. [] when nothing usable. Pure.
+ */
+export function pagesFromFailedGeneration(fg) {
+  if (!fg) return []
+  if (typeof fg !== 'string') return coercePages(fg)
+  let pages = coercePages(fg)
+  if (pages.length) return pages
+  const m = fg.match(/"(?:arguments|parameters)"\s*:\s*([\s\S]*?)\s*\}\s*$/)
+  if (m) pages = coercePages(m[1])
+  return pages
+}
+
+/**
+ * Ask Groq for a chunk of pages. Returns raw pages[] (also pages recovered from a
+ * 400 tool_use_failed), null when the answer held none, or { chunkError: { status,
+ * code } } when the call failed (generateHybridPages caps 400 retries on it).
+ */
+export async function fetchHybridChunk(plan, pages, feedback, stats, { client = groq } = {}) {
   const t0 = Date.now()
   try {
-    const res = await callTool(groq(), {
+    const res = await callTool(client(), {
       model: MODELS.content,
       maxTokens: HYBRID_MAX_TOKENS,
       tool: hybridContentTool,
@@ -1126,21 +1217,34 @@ async function fetchHybridChunk(plan, pages, feedback, stats) {
       label: 'Groq hybrid content',
       step: 'content',
     })
-    stats?.calls.push({ pages: pages.length, ms: Date.now() - t0, usage: res.usage ?? null, ok: !!res.args })
-    return Array.isArray(res.args?.pages) ? res.args.pages : null
+    const raws = coercePages(res.args)
+    stats?.calls.push({ pages: pages.length, ms: Date.now() - t0, usage: res.usage ?? null, ok: raws.length > 0 })
+    return raws.length ? raws : null
   } catch (err) {
-    stats?.calls.push({ pages: pages.length, ms: Date.now() - t0, error: err.status ?? err.message, code: err.error?.code ?? err.code })
-    console.warn(`hybrid content for pages ${pages.map(p => p.pageNum).join(',')} failed (${err.status ?? err.message}${err.status ? ` ${JSON.stringify(err.error ?? '').slice(0, 200)}` : ''})`)
-    return null
+    const code = err.error?.code ?? err.code
+    const fg = err.error?.failed_generation
+    const recovered = code === 'tool_use_failed' && fg ? pagesFromFailedGeneration(fg) : []
+    // The FULL failed_generation goes to stats (eval fixtures); the log stays short.
+    stats?.calls.push({ pages: pages.length, ms: Date.now() - t0, error: err.status ?? err.message, code, ...(fg ? { failedGeneration: fg } : {}), ...(recovered.length ? { recovered: recovered.length } : {}) })
+    const nums = pages.map(p => p.pageNum).join(',')
+    if (recovered.length) {
+      console.warn(`hybrid content for pages ${nums}: ${err.status} ${code} — recovered ${recovered.length} page(s) from failed_generation`)
+      return recovered
+    }
+    console.warn(`hybrid content for pages ${nums} failed (${err.status ?? err.message}${code ? ` ${code}` : ''}${err.error?.message ? `: ${String(err.error.message).slice(0, 120)}` : ''})`)
+    return { chunkError: { status: err.status ?? null, code: code ?? null } }
   }
 }
 
 /**
  * Pair each planned page of a call with its raw answer: by pageNum (number or "5"),
- * else — when the answer has no pageNum — by position among the answers. Pure.
+ * else — when the answer has no pageNum — by position among the answers. `raws` may
+ * be any shape coercePages reads. A page without a title gets the plan page's
+ * (titleFromPage); one without a known layout gets inferLayout's (`layoutInferred`).
+ * Pure.
  */
 export function matchRawPages(group, raws = []) {
-  const list = (Array.isArray(raws) ? raws : []).filter(r => r && typeof r === 'object')
+  const list = coercePages(raws)
   const numOf = (r) => { const n = Number(String(r.pageNum ?? '').match(/\d+/)?.[0]); return Number.isFinite(n) && String(r.pageNum ?? '').trim() !== '' ? n : null }
   const used = new Set()
   return group.map((page, i) => {
@@ -1148,7 +1252,10 @@ export function matchRawPages(group, raws = []) {
     if (k < 0 && list[i] && !used.has(i) && numOf(list[i]) === null) k = i
     if (k < 0) return null
     used.add(k)
-    return { ...list[k], pageNum: page.pageNum }
+    const r = { ...list[k], pageNum: page.pageNum }
+    if (!hasText(r.title)) r.title = titleFromPage(page)
+    if (!HYBRID_LAYOUTS.includes(r.layout)) { r.layout = inferLayout(r, page); r.layoutInferred = true }
+    return r
   })
 }
 
@@ -1170,6 +1277,9 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
   const selfCheck = matchingSelfCheckEnabled()
   const ambiguous = new Map() // pageNum → latest valid-but-ambiguous matching attempt
 
+  const bad400 = new Map() // pageNum → calls that failed with HTTP 400 and recovered nothing
+  const gaveUp = [] // pages whose 400 retry also failed: straight to the legacy fallback
+
   for (let attempt = 1; attempt <= HYBRID_MAX_ATTEMPTS && pending.length; attempt++) {
     // Pages whose whole call failed (e.g. 400 tool_use_failed) are retried one per call,
     // so one malformed page cannot sink its neighbours again.
@@ -1177,16 +1287,33 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
     const groups = [...chunk(pending.filter(p => !missing.has(p.pageNum)), HYBRID_PAGES_PER_CALL), ...chunk(lost, 1)]
     missing.clear()
     const results = await mapWithConcurrency(groups, recheckConcurrency(), g => fetchChunk(plan, g, feedback, stats))
+    const is400 = (r) => r?.chunkError?.status === 400
+    // Every call of the first round failed with 400 and nothing was recovered: Groq is
+    // rejecting this plan's calls outright, so retrying page by page only burns tokens.
+    if (attempt === 1 && groups.length && results.every(is400)) {
+      console.warn(`hybrid content: every call failed with 400 — ${pending.length} page(s) go to the legacy prompt without retries`)
+      gaveUp.push(...pending)
+      pending = []
+      break
+    }
     const next = []
     const checked = []
     groups.forEach((group, gi) => {
-      const matched = matchRawPages(group, results[gi] ?? [])
+      const res = results[gi]
+      const failed400 = is400(res)
+      const matched = matchRawPages(group, res?.chunkError ? [] : (res ?? []))
       for (const [pi, page] of group.entries()) {
         const raw = matched[pi]
         if (!raw) {
-          feedback.set(page.pageNum, ['the page was missing from your answer'])
+          stats?.pages.push({ pageNum: page.pageNum, attempt, layout: null, issues: [failed400 ? 'call failed (400)' : 'missing'] })
+          if (failed400) {
+            const n400 = (bad400.get(page.pageNum) ?? 0) + 1
+            bad400.set(page.pageNum, n400)
+            // A 400 page gets one retry (alone); a second 400 sends it to the legacy prompt.
+            if (n400 > 1) { gaveUp.push(page); continue }
+          }
+          feedback.set(page.pageNum, [`no readable entry for this page — ${EXPECTED_SHAPE}`])
           missing.add(page.pageNum)
-          stats?.pages.push({ pageNum: page.pageNum, attempt, layout: null, issues: ['missing'] })
           next.push(page)
           continue
         }
@@ -1240,7 +1367,7 @@ export async function generateHybridPages(plan, contentPages, { fetchChunk = fet
   }
 
   const failed = []
-  for (const page of pending) {
+  for (const page of [...pending, ...gaveUp].sort((a, b) => a.pageNum - b.pageNum)) {
     // Still ambiguous after every attempt: ship the last one without its offending
     // pairs if enough remain (the rest were confirmed unambiguous by the self-check).
     const amb = ambiguous.get(page.pageNum)
