@@ -109,7 +109,9 @@ describe('prompt + schema', () => {
 
 describe('generateHybridPages: tolerant matching and capped 400 retries', () => {
   const four = [p2, p3, page(4, 'more-adding', 'Word problems about adding'), page(5, 'even-more', 'Word problems about adding')]
-  const good = (g) => (g.pageNum === 3 ? { pageNum: 3, ...flatShapes } : { pageNum: g.pageNum, questions: qs })
+  // Distinct sums per page: identical pages would be rejected as duplicates.
+  const qsFor = (n) => [1, 2, 3, 4].map(k => ({ num: k, question: `What is ${n * 10 + k} + ${k}?`, answer: String(n * 10 + 2 * k) }))
+  const good = (g) => (g.pageNum === 3 ? { pageNum: 3, ...flatShapes } : { pageNum: g.pageNum, questions: qsFor(g.pageNum) })
 
   it('untitled, layout-less pages from the fetcher all validate', async () => {
     const fetchChunk = vi.fn(async (_p, group) => ({ pages: group.map(g => { const { layout, ...r } = good(g); return r }) }))
