@@ -10,6 +10,7 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 |-------|------|
 | Brainstorm (topic + plan) | gpt-4o (`openai`) — or openai/gpt-oss-120b on Groq with `BRAINSTORM_PROVIDER=groq` |
 | Content generation + Q&A recheck | openai/gpt-oss-120b (Groq, OpenAI-compatible) |
+| Groq fallback (opt-in, after Groq's daily limit) | gemini-3.5-flash-lite (Gemini free tier, OpenAI-compatible endpoint) |
 | Page QA (vision) + answer reconcile | gpt-4o-mini (`openai`) |
 | Image generation | gpt-image-2 (`openai`) |
 | Cover illustration (opt-in hybrid cover) | Cloudflare Workers AI `@cf/black-forest-labs/flux-1-schnell` (free tier, native fetch) |
@@ -30,6 +31,7 @@ Daily GitHub Actions pipeline that generates printable worksheet SETs for Teache
 - **Layered module layout** — library code lives under `src/` (`config/`, `llm/`, `lib/`, `steps/`); `scripts/` holds only thin entry points (`pipeline.js`, `test-plan.js`, `create-issue.js`) plus local-only helpers. CI still invokes `node scripts/pipeline.js`, so entry-point paths are stable.
 - **Two LLM providers** — text brainstorm + vision QA run on OpenAI; Q&A content generation + recheck run on **Groq** (`openai/gpt-oss-120b`; `llama-3.3-70b-versatile` was retired 2026-08-16) via the OpenAI-compatible endpoint. Clients are lazy singletons in `src/llm/clients.js` (`openai()`, `groq()`).
 - **Brainstorm provider is switchable** — `BRAINSTORM_PROVIDER=groq` runs brainstorm on Groq `openai/gpt-oss-120b` (free tier, `MODELS.brainstormGroq`) instead of OpenAI gpt-4o; unset/`openai` is the default and unknown values fall back to openai with a warning (`resolveBrainstormProvider`, `src/lib/brainstorm-provider.js`). Same prompt, schema, forced tool call and `validate()` retry loop; Groq gets `max_tokens` 16000 because gpt-oss reasoning tokens count toward it, and retries echo only `role/content/tool_calls` (not Groq's `reasoning` field). Cost is recorded under whichever model ran. Compare `npm run test:plan` (and `npm run eval`) on both providers before switching CI.
+- **Gemini fallback for Groq (opt-in)** — with `GROQ_FALLBACK=gemini` and `GEMINI_API_KEY` set, `groq()` returns a wrapped client (`src/llm/groq-fallback.js`): when a Groq call fails with the **daily** 429 (`isDailyLimitExhausted`, TPD/RPD), the same request is replayed on Gemini's OpenAI-compatible endpoint (`MODELS.groqFallbackGemini`, `gemini-3.5-flash-lite`) and every later Groq call in the process goes straight to Gemini (one `warn`). Per-minute 429s, 400s and other errors are untouched; requests with a built-in tool (market-check's `browser_search`) are never replayed, so its fail-open path applies. The replay swaps the model, drops Groq-only params (`reasoning_effort`, `reasoning_format`, `include_reasoning`, message `reasoning`) and caps `max_tokens` at 16000; each Gemini call has a 60s timeout and up to 2 retries on 503/429/timeout (Flash-lite still 503s under "high demand"; bigger Flash models were unusable), then throws a status-less error so `withRetry` does not multiply attempts. Usage is recorded under the Gemini model (`result.servedBy`, PRICING 0). Free-tier limits are unknown and **free-tier prompts may be used by Google for training** (acceptable here: no user data). Default off; not yet eval-compared against Groq.
 - **Forced tool call for structured JSON** — `tool_choice: {type:'function', function:{name:'...'}}` reliably forces structured output. The single-shot pattern is wrapped in `src/llm/tool-call.js` (`callTool`); brainstorm keeps a bespoke multi-turn validation-retry loop. Parse with `JSON.parse(toolCall.function.arguments)`.
 - **Shared retry** — `src/llm/with-retry.js` (`withRetry`) retries 429/500/503 with exponential backoff. One implementation, used by every API call site. A 429 for exhausted OpenAI credits (`isQuotaExhausted`) or a Groq **daily** limit (`isDailyLimitExhausted`: "tokens per day (TPD)" / "requests per day (RPD)") is thrown at once — the free tier's 200k tokens/day window cannot reset within the ≤60s waits; per-minute 429s (TPM/RPM) are still retried with the server's hint.
 - **gpt-image-2** — DALL-E 3 was retired March 2026. gpt-image-2 does not accept `response_format` param; always returns b64_json.
@@ -87,6 +89,7 @@ src/
     clients.js            lazy openai() / groq() singletons
     with-retry.js         withRetry (429/500/503 backoff)
     tool-call.js          callTool (forced single tool call + JSON parse)
+    groq-fallback.js      opt-in Gemini replay after Groq's daily limit (GROQ_FALLBACK=gemini)
     flux.js               Cloudflare Workers AI FLUX.1 schnell (generateIllustration)
   lib/
     slugify.js  source-pages.js  markdown.js  logger.js
@@ -127,6 +130,8 @@ eval/                     live eval cases (cases.json) + fixture images from rea
 |----------|---------|
 | `OPENAI_API_KEY` | brainstorm, generate-pages, validate-page, reconcile-content, generate-marketing-slides — not needed with `PAGE_RENDERER=hybrid-only` |
 | `GROQ_API_KEY` | generate-content (content + Q&A recheck), market-check, brainstorm when `BRAINSTORM_PROVIDER=groq` |
+| `GROQ_FALLBACK` | clients.js — `gemini` = replay Groq calls on Gemini after Groq's daily limit (needs `GEMINI_API_KEY`); unset = off |
+| `GEMINI_API_KEY` | groq-fallback — Gemini API key (free tier) for `GROQ_FALLBACK=gemini` |
 | `BRAINSTORM_PROVIDER` | brainstorm — `openai` (default/unset, gpt-4o) or `groq` (openai/gpt-oss-120b, free); unknown → openai + warning |
 | `GOOGLE_DRIVE_FOLDER_ID` | upload-drive (full assets folder) |
 | `GOOGLE_DRIVE_TPT_FOLDER_ID` | upload-drive (TPT folder — color set + preview PDFs in a per-run subfolder, optional) |

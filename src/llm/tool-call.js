@@ -30,7 +30,7 @@ export async function callTool(client, { model, messages, tool, maxTokens, label
     }),
     { label },
   )
-  recordUsage(step, model, result.usage)
+  recordUsage(step, result.servedBy ?? model, result.usage)
 
   const message = result.choices[0].message
   const toolCall = message.tool_calls?.[0]
